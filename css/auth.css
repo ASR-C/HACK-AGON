@@ -1,0 +1,69 @@
+/* ============================================================
+   HackAgon — auth.css
+   Split brand/form layout for login, signup and OTP pages.
+   ============================================================ */
+
+.auth { min-height: 100vh; display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); }
+
+/* Left brand panel */
+.auth__brand {
+  background: var(--ink); color: var(--paper);
+  padding: var(--sp-6); display: flex; flex-direction: column; justify-content: space-between;
+  position: relative; overflow: hidden; gap: var(--sp-6);
+}
+.auth__brand::after {
+  content: ""; position: absolute; right: -120px; bottom: -120px; width: 340px; height: 340px;
+  border: 3px solid rgba(221,154,43,.25); border-radius: 50%;
+}
+.auth__brand::before {
+  content: ""; position: absolute; right: -60px; bottom: -60px; width: 220px; height: 220px;
+  border: 3px dashed rgba(180,82,58,.4); border-radius: 50%;
+}
+.auth__brand .brand { color: var(--paper); }
+.auth__brand .brand__name { color: var(--paper); }
+.auth__brand .brand__name span { color: var(--turmeric); }
+.auth__headline { font-family: var(--font-display); font-weight: 900; font-size: clamp(2rem, 3.6vw, 3rem); line-height: 1.06; letter-spacing: -.02em; }
+.auth__headline em { font-style: italic; color: var(--turmeric); }
+.auth__hand { font-family: var(--font-hand); color: var(--clay); font-size: var(--fs-md); transform: rotate(-1.5deg); }
+.auth__note {
+  background: var(--turmeric); color: var(--on-accent); border: var(--bw-thick) solid var(--paper);
+  border-radius: var(--r-md); padding: var(--sp-4); transform: rotate(-2deg);
+  box-shadow: 6px 6px 0 rgba(0,0,0,.35); max-width: 320px; font-size: var(--fs-sm); font-weight: 600;
+}
+.auth__list { display: grid; gap: var(--sp-3); color: var(--clay); font-size: var(--fs-sm); }
+.auth__list li { display: flex; gap: var(--sp-3); align-items: flex-start; }
+.auth__list .ic { width: 20px; height: 20px; color: var(--turmeric); flex: none; margin-top: 2px; }
+
+/* Right form panel */
+.auth__form { display: grid; place-items: center; padding: var(--sp-7) var(--sp-4); }
+.auth__card { width: min(480px, 100%); }
+.auth__card h1 { font-size: var(--fs-2xl); margin-bottom: var(--sp-2); }
+.auth__sub { color: var(--text-muted); margin-bottom: var(--sp-5); }
+.auth__switch { margin-top: var(--sp-5); text-align: center; font-size: var(--fs-sm); color: var(--text-muted); }
+.auth__foot { margin-top: var(--sp-4); font-size: var(--fs-xs); color: var(--text-faint); text-align: center; }
+
+/* OTP boxes */
+.otp-row { display: flex; gap: var(--sp-2); justify-content: center; }
+.otp-row input {
+  width: 52px; height: 62px; text-align: center; font-family: var(--font-mono); font-size: 1.5rem; font-weight: 700;
+  background: var(--paper-2); border: var(--bw) solid var(--border-strong); border-radius: var(--r-md);
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast);
+}
+.otp-row input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--turmeric) 45%, transparent); transform: translateY(-2px); }
+.otp-meta { display: flex; justify-content: space-between; align-items: center; font-size: var(--fs-xs); color: var(--text-faint); margin-top: var(--sp-3); }
+.otp-meta button { color: var(--primary); font-weight: 700; font-size: var(--fs-xs); text-decoration: underline; }
+.otp-meta button[disabled] { color: var(--text-faint); text-decoration: none; cursor: not-allowed; }
+
+/* delivery note — shows masked address where code was sent */
+.otp-sent-note {
+  display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4);
+  background: var(--paper-2); border: var(--bw) solid var(--border);
+  border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); color: var(--text-muted);
+}
+.otp-sent-note .ic { width: 18px; height: 18px; color: var(--primary); flex: none; }
+
+@media (max-width: 900px) {
+  .auth { grid-template-columns: 1fr; }
+  .auth__brand { display: none; }
+  .auth__form { padding: calc(var(--sp-6)) var(--sp-4); }
+}

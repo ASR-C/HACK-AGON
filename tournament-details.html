@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tournament rules · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .rules-grid { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr); gap: var(--sp-5); align-items: start; }
+    .rule-row { display: flex; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-3) 0; border-bottom: 1.5px dashed var(--border); font-size: var(--fs-sm); }
+    .rule-row:last-child { border-bottom: none; }
+    .rule-row dt { color: var(--text-muted); }
+    .rule-row dd { font-weight: 700; text-align: right; }
+    .accept { background: color-mix(in srgb, var(--turmeric) 16%, var(--surface)); border: var(--bw-thick) solid var(--ink); border-radius: var(--r-lg); padding: var(--sp-5); box-shadow: var(--sh-hard); }
+    @media (max-width: 900px) { .rules-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main" class="page">
+    <div class="wrap">
+      <div id="detail"></div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, on, el, icon, toast, money, escapeHtml, statusBadge, diffPill, emptyState, act } = window.App, S = window.Store, SEED = S.SEED;
+      const id = new URLSearchParams(location.search).get("room");
+      const box = qs("#detail");
+
+      window.App.page(async () => {
+        const me = window.App.requireAuth(); if (!me) return;
+        window.App.mountShell("tournaments");
+
+        let r = null;
+        try { r = id ? await S.fetchRoom(id) : null; } catch (err) { r = null; }
+
+        if (!r || r.type !== "tournament") {
+          box.innerHTML = emptyState("That tournament isn't here.", "It may have ended, or the link is off by a character.", '<a class="btn btn--primary" href="tournaments.html">Back to tournaments</a>');
+          return;
+        }
+
+        const isHost = r.hostId === me.id;
+        const joined = !!S.getPlayer(r.id, me.id);
+        const pool = r.prizePoolPaise || 0, fee = r.entryFeePaise || 0;
+        const split = r.split || { 1: 100 };
+        const net = pool - S.platformFee(pool);
+        const age = S.ageFromDob(me.dob);
+        const tooYoung = fee > 0 && age < 18;
+
+        const langLabels = (r.langs || []).map(l => (SEED.languages.find(x => x.id === l) || {}).label || l).join(", ");
+        const topicCount = (r.topics || []).length;
+
+      box.innerHTML = `
+        <div class="row row--between" style="align-items:flex-end;flex-wrap:wrap;gap:var(--sp-3);margin-bottom:var(--sp-5)">
+          <div>
+            <div class="row row--tight" style="margin-bottom:6px">${statusBadge(r)} ${r.tournamentMode ? '<span class="badge badge--proctored">' + icon("camera") + ' Proctored</span>' : ''} ${fee ? '<span class="badge badge--paid">' + money(fee) + ' entry</span>' : '<span class="badge badge--free">Free</span>'}</div>
+            <h1 class="squiggle">${escapeHtml(r.name)}</h1>
+            <p class="lead">Hosted by ${escapeHtml(r.hostName || "a host")}${r.org ? ' · ' + escapeHtml(r.org.name) : ''}. Read this page before you pay or join &mdash; we won&rsquo;t let you skip it.</p>
+          </div>
+          ${isHost ? '<a class="btn btn--ghost" href="host-dashboard.html?room=' + r.id + '">' + icon("flag") + ' Host dashboard</a>' : ''}
+        </div>
+
+        <div class="rules-grid">
+          <div class="stack stack-5">
+            <div class="card card--sticker">
+              <div class="card__title" style="margin-bottom:var(--sp-3)">The rules, in full</div>
+              <dl>
+                <div class="rule-row"><dt>Entry fee</dt><dd>${fee ? money(fee) + " (held in escrow)" : "Free"}</dd></div>
+                <div class="rule-row"><dt>Prize pool</dt><dd>${pool ? money(pool) : "None"}</dd></div>
+                <div class="rule-row"><dt>Platform fee</dt><dd>${pool ? money(S.platformFee(pool)) + " (1% of pool, from the pool)" : "—"}</dd></div>
+                <div class="rule-row"><dt>Prize split</dt><dd>${Object.keys(split).map(k => "#" + k + " " + split[k] + "%").join(" · ")}</dd></div>
+                <div class="rule-row"><dt>Languages</dt><dd>${escapeHtml(langLabels)}</dd></div>
+                <div class="rule-row"><dt>Topics</dt><dd>${topicCount} topic${topicCount === 1 ? "" : "s"}</dd></div>
+                <div class="rule-row"><dt>Questions</dt><dd>${(r.questionIds || []).length}</dd></div>
+                <div class="rule-row"><dt>Duration</dt><dd>${r.durationMin} min${r.timePerQ ? " · " + r.timePerQ + " min/question" : ""}</dd></div>
+                <div class="rule-row"><dt>Format</dt><dd>${escapeHtml(r.format)}</dd></div>
+                <div class="rule-row"><dt>Tournament mode</dt><dd>${r.tournamentMode ? "On — webcam + tab-lock" : "Off"}</dd></div>
+                <div class="rule-row"><dt>Minimum players</dt><dd>${r.minPlayers}</dd></div>
+                <div class="rule-row"><dt>Players in</dt><dd>${r.players.length} / ${r.size}</dd></div>
+              </dl>
+            </div>
+
+            <div class="card card--flat" style="border:var(--bw) solid var(--border-strong)">
+              <div class="card__title" style="margin-bottom:var(--sp-3)">Where the prize goes</div>
+              <div class="stack stack-2">
+                ${Object.keys(split).sort((a, b) => a - b).map(k => `<div class="row row--between"><span class="row row--tight">${Number(k) === 1 ? icon("trophy") : ""}<strong>Rank ${k}</strong><span class="xs faint">${split[k]}% of ${money(net)}</span></span><strong>${money(Math.round(net * split[k] / 100))}</strong></div>`).join("")}
+              </div>
+              <p class="xs faint" style="margin-top:var(--sp-3)">Splits are fixed and published before registration, and lock once registration opens. No random draws, ever.</p>
+            </div>
+
+            <div class="grid grid-2">
+              <div class="card card--well">
+                <div class="row row--tight" style="margin-bottom:6px">${icon("alert")}<strong class="small">Elimination</strong></div>
+                <p class="xs muted">The host can eliminate any player at any time with a stored reason. Eliminated players can&rsquo;t rejoin, lose their ranking, and &mdash; for unfair means &mdash; get no refund and no prize. Abuse of elimination can be disputed, which blocks payout until an admin reviews it.</p>
+              </div>
+              <div class="card card--well">
+                <div class="row row--tight" style="margin-bottom:6px">${icon("refresh")}<strong class="small">Refunds</strong></div>
+                <p class="xs muted">Cancelled before start, or the minimum players never showed? Every entry fee and the whole pool refund in full. Any other elimination follows the host&rsquo;s stated rule above.</p>
+              </div>
+            </div>
+
+            ${r.tournamentMode ? `<div class="card card--flat" style="border:var(--bw) solid var(--stamp);background:color-mix(in srgb, var(--stamp) 6%, var(--surface))">
+              <div class="row row--tight" style="margin-bottom:6px;color:var(--stamp)">${icon("camera")}<strong class="small">Proctored match</strong></div>
+              <p class="xs muted">Camera on before you start, a snapshot every ${r.snapshotSecs}s, and the match locks for good if you switch tab, minimise, or leave fullscreen. The lock is stored server-side &mdash; refreshing won&rsquo;t help. These checks reduce cheating but can&rsquo;t stop a second device; the host&rsquo;s right to eliminate is the final control.</p>
+            </div>` : ""}
+          </div>
+
+          <aside class="stack stack-4" style="position:sticky;top:calc(var(--topbar-h) + 16px)">
+            <div class="accept">
+              <div class="card__title">${joined ? "You're in" : (fee ? "Pay &amp; join" : "Join this tournament")}</div>
+              ${tooYoung
+                ? `<p class="small" style="margin:var(--sp-3) 0;color:var(--stamp);font-weight:700">Paid tournaments are 18+. Your account says you're ${age}. Free rooms are still open to you.</p>`
+                : joined
+                  ? `<p class="small muted" style="margin:var(--sp-3) 0">${isHost
+                      ? (fee ? "You're the host, so your own seat is free &mdash; the entry fee is what players pay into escrow." : "Your seat is confirmed.")
+                      : `Entry ${fee ? "paid and held in escrow" : "confirmed"}.`} Head to the match when it starts.</p>
+                     <a class="btn btn--primary btn--block" href="match.html?room=${r.id}">${icon("play")} ${r.status === "live" ? "Enter live match" : "Go to match"}</a>`
+                  : `<label class="check" style="margin:var(--sp-4) 0"><input type="checkbox" id="acceptBox"><span class="check__box">${icon("check")}</span><span class="check__text">I've read the rules, the split, the elimination and refund terms${r.tournamentMode ? ", and the proctoring conditions" : ""}.</span></label>
+                     <button class="btn btn--primary btn--block" id="joinBtn" disabled>${fee ? icon("rupee") + " Pay " + money(fee) + " &amp; join" : icon("play") + " Join"}</button>
+                     <p class="xs faint" style="margin-top:var(--sp-3)">${fee ? "Charged once through Razorpay (simulated here) and held in escrow until results lock." : "Free to join. Your seat is held until start."}</p>`}
+              ${isHost ? `<a class="btn btn--ghost btn--block" style="margin-top:var(--sp-2)" href="host-dashboard.html?room=${r.id}">Manage as host</a>` : ""}
+            </div>
+            <div class="card card--well">
+              <div class="card__title" style="font-size:var(--fs-md)">Who's in (${r.players.length}/${r.size})</div>
+              <div class="stack stack-2" style="margin-top:var(--sp-3)">
+                ${r.players.length ? r.players.map(p => `<div class="row row--tight">${window.App.avatarHtml(p, "sm")}<span class="small">${escapeHtml(p.name)}</span></div>`).join("") : '<p class="xs faint">No one yet. Be the first name on the sheet.</p>'}
+              </div>
+            </div>
+          </aside>
+        </div>`;
+
+        const acceptBox = qs("#acceptBox"), joinBtn = qs("#joinBtn");
+        if (acceptBox) on(acceptBox, "change", () => { joinBtn.disabled = !acceptBox.checked; });
+        const joinFree = act(async () => {
+          await S.joinRoom(r.id);
+          toast("You're in. See you at start.", { type: "success" });
+          location.reload();
+        }, joinBtn);
+        if (joinBtn) on(joinBtn, "click", () => {
+          if (fee > 0) {
+            const back = window.App.openModal(`
+              <div class="modal__head"><div class="modal__title">Entry fee</div></div>
+              <div class="modal__body stack">
+                <p class="small muted">Razorpay checkout (simulated). Your fee is captured into escrow, not to the host.</p>
+                <div class="row row--between card card--well"><span>Entry fee</span><strong>${money(fee)}</strong></div>
+                <div class="row row--between card card--well"><span>Platform fee on entry</span><strong>₹0</strong></div>
+              </div>
+              <div class="modal__foot"><button class="btn btn--ghost" data-close>Cancel</button><button class="btn btn--success" id="payEntry">${icon("rupee")} Pay ${money(fee)}</button></div>`, { width: 420 });
+            // One call: the server escrows the fee and seats you in the same transaction.
+            on(qs("#payEntry", back), "click", act(async () => {
+              await S.payEntry(r.id);
+              window.App.closeModal(back);
+              toast("Entry paid and held in escrow. You're in.", { type: "success" });
+              location.reload();
+            }, qs("#payEntry", back)));
+          } else {
+            joinFree();
+          }
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

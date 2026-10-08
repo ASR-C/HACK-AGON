@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Verify your code · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/auth.css" />
+</head>
+<body>
+  <div class="auth">
+    <aside class="auth__brand">
+      <a class="brand" href="index.html"><span class="brand__mark" data-ic="logo"></span><span class="brand__name">Hack<span>Agon</span></span></a>
+      <div>
+        <p class="auth__hand">six little digits,</p>
+        <h1 class="auth__headline">one very <em>real</em> you.</h1>
+        <ul class="auth__list" style="margin-top:var(--sp-5)">
+          <li><span class="ic" data-ic="send"></span> The same code went to your email and your mobile.</li>
+          <li><span class="ic" data-ic="clock"></span> It lives for 5 minutes and allows 5 tries.</li>
+          <li><span class="ic" data-ic="refresh"></span> Need another? Resend opens after 60 seconds.</li>
+        </ul>
+      </div>
+      <div class="auth__note">Codes go out by Gmail SMTP to the address you signed up with. SMS isn't wired up yet, so the mobile number is stored but not texted. Codes are kept hashed in MySQL and expire in 5 minutes.</div>
+    </aside>
+
+    <main class="auth__form">
+      <div class="auth__card">
+        <span class="eyebrow" id="modeEyebrow">almost in</span>
+        <h1 id="pageTitle">Enter your code</h1>
+        <p class="auth__sub" id="pageSub">We sent a 6-digit code to your email.</p>
+
+        <div class="otp-sent-note hide" id="devOtp"><span class="ic" data-ic="send"></span><div id="devCode"></div></div>
+
+        <form id="otpForm" class="stack" novalidate>
+          <div class="otp-row" id="otpRow" aria-label="6 digit code"></div>
+          <div class="otp-meta">
+            <span id="expiry">Expires in 5:00</span>
+            <span id="attempts">5 tries left</span>
+          </div>
+          <span class="error-text" id="otpError" style="display:none"></span>
+          <button class="btn btn--primary btn--lg btn--block" type="submit" id="verifyBtn">Verify &amp; continue</button>
+          <div class="otp-meta" style="justify-content:center"><button type="button" id="resendBtn" disabled>Resend code</button></div>
+        </form>
+
+        <!-- forgot-password second step (hidden until code verified) -->
+        <form id="resetForm" class="stack hide" novalidate>
+          <div class="field" data-f="np">
+            <label class="label" for="np">New password</label>
+            <input class="input" id="np" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
+            <span class="error-text"></span>
+          </div>
+          <div class="field" data-f="np2">
+            <label class="label" for="np2">Type it again</label>
+            <input class="input" id="np2" type="password" autocomplete="new-password" placeholder="Same again" />
+            <span class="error-text"></span>
+          </div>
+          <button class="btn btn--primary btn--lg btn--block" type="submit">Set new password</button>
+        </form>
+
+        <p class="auth__switch"><a href="login.html">Back to log in</a></p>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, qsa, on, toast, el, ICONS, page } = window.App, S = window.Store;
+      document.querySelectorAll("[data-ic]").forEach(e => { e.innerHTML = ICONS[e.dataset.ic] || ""; });
+
+      const params = new URLSearchParams(location.search);
+      const mode = params.get("mode") || "signup";
+      const next = params.get("next") || "arena.html";
+      let curId = params.get("otp");
+      let otp = null;
+
+      if (mode === "forgot") { qs("#modeEyebrow").textContent = "reset"; qs("#pageTitle").textContent = "Verify, then pick a new password"; }
+
+      // build 6 boxes
+      const row = qs("#otpRow");
+      for (let i = 0; i < 6; i++) {
+        const inp = el('<input inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="digit ' + (i + 1) + '" />');
+        row.appendChild(inp);
+      }
+      const boxes = qsa("input", row);
+      boxes.forEach((b, i) => {
+        on(b, "input", () => {
+          b.value = b.value.replace(/\D/g, "").slice(-1);
+          if (b.value && i < 5) boxes[i + 1].focus();
+        });
+        on(b, "keydown", e => { if (e.key === "Backspace" && !b.value && i > 0) boxes[i - 1].focus(); });
+        on(b, "paste", e => {
+          e.preventDefault();
+          const txt = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+          txt.split("").forEach((ch, j) => { if (boxes[j]) boxes[j].value = ch; });
+          (boxes[Math.min(txt.length, 5)] || b).focus();
+        });
+      });
+
+      function code() { return boxes.map(b => b.value).join(""); }
+      function showError(msg) { const e = qs("#otpError"); e.style.display = "block"; e.textContent = msg; }
+      function clearError() { qs("#otpError").style.display = "none"; }
+
+      let tickTimer = null;
+      function paintMeta() {
+        if (!otp) return;
+        const left = otp.expiresAt - S.now();
+        qs("#expiry").textContent = left > 0 ? "Expires in " + S.fmtDuration(left) : "Expired";
+        const tries = otp.maxAttempts - otp.attempts;
+        qs("#attempts").textContent = tries > 0 ? tries + " tries left" : "No tries left";
+        const expired = left <= 0;
+        qs("#verifyBtn").disabled = expired || tries <= 0;
+        qs("#resendBtn").disabled = !S.canResend();
+        if (expired) showError("That code expired. Grab a fresh one below.");
+      }
+      function startTick() { if (tickTimer) clearInterval(tickTimer); paintMeta(); tickTimer = setInterval(paintMeta, 1000); }
+
+      async function loadOtp(id) {
+        curId = id;
+        if (!id) { showError("We couldn't find that code. Start over from sign up."); qs("#verifyBtn").disabled = true; return; }
+        try {
+          otp = await S.otpMeta(id);
+        } catch (err) {
+          otp = null; showError(err.message); qs("#verifyBtn").disabled = true; return;
+        }
+        // Show delivery confirmation with masked address only — never the raw code.
+        const box = qs("#devOtp");
+        if (otp.target) {
+          box.classList.remove("hide");
+          qs("#devCode").textContent = "Code sent by " + (otp.channel === "email" ? "email" : "SMS") + " to " + otp.target;
+        } else {
+          box.classList.add("hide");
+        }
+        qs("#pageSub").textContent = "Check your email for a 6-digit code" + (otp.target ? " sent to " + otp.target : "") + ".";
+        startTick();
+      }
+
+      on(qs("#resendBtn"), "click", async () => {
+        if (!curId) return;
+        try {
+          const fresh = await S.resendOtp(curId);
+          boxes.forEach(b => b.value = ""); boxes[0].focus(); clearError();
+          toast(fresh.mailed ? "New code sent — check your email." : "Couldn't send the code. Check server mail config.", { type: fresh.mailed ? "info" : "error" });
+          await loadOtp(fresh.otpId || curId);
+        } catch (err) {
+          toast(err.message, { type: "error" });
+          otp = S.state.lastOtp; startTick();
+        }
+      });
+
+      on(qs("#otpForm"), "submit", async e => {
+        e.preventDefault(); clearError();
+        const c = code();
+        if (c.length < 6) { showError("Six digits, please."); return; }
+        qs("#verifyBtn").disabled = true;
+        try {
+          await S.verifyOtp(curId, c);
+        } catch (err) {
+          showError(err.message + (err.left != null ? " (" + err.left + " left)" : ""));
+          boxes.forEach(b => b.value = ""); boxes[0].focus();
+          if (otp) otp.attempts = Math.min(otp.maxAttempts, otp.attempts + 1);
+          paintMeta();
+          return;
+        }
+        if (mode === "forgot") {
+          qs("#otpForm").classList.add("hide"); qs("#devOtp").classList.add("hide");
+          qs("#resetForm").classList.remove("hide");
+          qs("#pageTitle").textContent = "Pick a new password";
+          qs("#pageSub").textContent = "Code checked. Now choose something you'll actually remember.";
+          toast("Code verified.", { type: "success" });
+        } else {
+          toast("You're in. Welcome to HackAgon.", { type: "success" });
+          location.href = next;
+        }
+      });
+
+      on(qs("#resetForm"), "submit", async e => {
+        e.preventDefault();
+        const a = qs("#np").value, b = qs("#np2").value;
+        qs('[data-f="np"]').classList.remove("is-invalid"); qs('[data-f="np2"]').classList.remove("is-invalid");
+        if (a.length < 8) { qs('[data-f="np"]').classList.add("is-invalid"); qs('[data-f="np"] .error-text').textContent = "At least 8 characters."; return; }
+        if (a !== b) { qs('[data-f="np2"]').classList.add("is-invalid"); qs('[data-f="np2"] .error-text').textContent = "These two don't match."; return; }
+        try {
+          await S.resetPassword(curId, code(), a);
+        } catch (err) {
+          qs('[data-f="np"]').classList.add("is-invalid");
+          qs('[data-f="np"] .error-text').textContent = err.message;
+          return;
+        }
+        toast("Password changed. You're logged in.", { type: "success" });
+        location.href = "arena.html";
+      });
+
+      page(async () => {
+        await loadOtp(curId);
+        boxes[0].focus();
+      });
+    })();
+  </script>
+</body>
+</html>

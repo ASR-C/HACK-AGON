@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Profile · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .p-head { display: flex; gap: var(--sp-5); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-6); }
+    .stat-band { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--sp-4); margin-bottom: var(--sp-6); }
+    .ach { text-align: left; }
+    .ach.is-locked { opacity: .55; }
+    .ach__ic { width: 40px; height: 40px; color: var(--turmeric-d); }
+    .ach.is-unlocked .ach__ic { color: var(--forest); }
+    @media (max-width: 760px) { .stat-band { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main" class="page">
+    <div class="wrap">
+      <div class="p-head" id="pHead"></div>
+      <div class="stat-band" id="statBand"></div>
+
+      <div class="split split--60-40" style="align-items:start">
+        <div class="stack stack-6">
+          <div class="card card--sticker">
+            <div class="card__title" style="margin-bottom:var(--sp-4)">Your details</div>
+            <form id="detailsForm" class="stack stack-4" novalidate>
+              <div class="grid grid-2">
+                <div class="field" data-f="name"><label class="label" for="pName">Display name</label><input class="input" id="pName" /><span class="error-text"></span></div>
+                <div class="field"><label class="label" for="pUser">Username</label><input class="input" id="pUser" disabled /><span class="hint">Usernames are permanent.</span></div>
+              </div>
+              <div class="grid grid-2">
+                <div class="field" data-f="email"><label class="label" for="pEmail">Email</label><input class="input" id="pEmail" type="email" /><span class="hint">Changing this needs a fresh OTP.</span><span class="error-text"></span></div>
+                <div class="field" data-f="mobile"><label class="label" for="pMobile">Mobile</label><input class="input" id="pMobile" inputmode="numeric" /><span class="hint">Changing this needs a fresh OTP.</span><span class="error-text"></span></div>
+              </div>
+              <div class="field"><label class="label" for="pBio">Bio</label><textarea class="textarea" id="pBio" rows="3" placeholder="One line about how you code."></textarea></div>
+              <div class="field"><span class="label">Preferred languages</span><div class="stack stack-2" id="pLangs"></div></div>
+              <button class="btn btn--primary" type="submit">Save details</button>
+            </form>
+          </div>
+
+          <div class="card card--sticker">
+            <div class="card__head"><div class="card__title">Payout details</div><span id="payoutBadge"></span></div>
+            <p class="small muted" style="margin-bottom:var(--sp-4)">Needed to enter paid tournaments and to receive winnings. Changing them holds payouts for 24 hours (PRD 5).</p>
+            <form id="payoutForm" class="stack stack-4" novalidate>
+              <div class="field"><span class="label">Method</span>
+                <div class="seg" id="payMethod">
+                  <label class="seg__opt"><input type="radio" name="pm" value="upi" checked><span>UPI ID</span></label>
+                  <label class="seg__opt"><input type="radio" name="pm" value="bank"><span>Bank account</span></label>
+                </div>
+              </div>
+              <div class="field" data-f="upi" id="upiWrap"><label class="label" for="pUpi">UPI ID</label><input class="input" id="pUpi" placeholder="name@bank" /><span class="error-text"></span></div>
+              <div class="grid grid-2 hide" id="bankWrap">
+                <div class="field" data-f="acct"><label class="label" for="pAcct">Account number</label><input class="input" id="pAcct" inputmode="numeric" /><span class="error-text"></span></div>
+                <div class="field" data-f="ifsc"><label class="label" for="pIfsc">IFSC</label><input class="input" id="pIfsc" placeholder="ABCD0123456" /><span class="error-text"></span></div>
+              </div>
+              <button class="btn btn--primary" type="submit">Save &amp; verify</button>
+            </form>
+          </div>
+
+          <div class="card card--sticker">
+            <div class="card__title" style="margin-bottom:var(--sp-4)">Match history</div>
+            <div id="history" class="stack stack-2"></div>
+          </div>
+        </div>
+
+        <aside class="stack stack-5">
+          <div>
+            <h3 class="squiggle" style="font-size:var(--fs-lg);margin-bottom:var(--sp-4)">Achievements</h3>
+            <div class="stack stack-3" id="achList"></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, qsa, on, icon, toast, escapeHtml, avatarHtml, act, openModal, closeModal, clearErrs, showErrs } = window.App, S = window.Store, SEED = S.SEED;
+
+      window.App.page(async () => {
+        let me = window.App.requireAuth(); if (!me) return;
+        window.App.mountShell("profile");
+
+        await Promise.all([
+          S.recomputeAchievements().catch(() => {}),
+          S.refreshRooms().catch(() => {})
+        ]);
+        me = S.currentUser();
+
+        /* ---------- head + stats ---------- */
+        qs("#pHead").innerHTML = `${avatarHtml(me, "lg")}<div><h1 style="font-size:var(--fs-2xl)">${escapeHtml(me.name)}</h1><p class="muted">@${escapeHtml(me.username)} · joined ${S.fmtDate(me.createdAt)} · rating <strong class="mono">${me.stats.rating || 0}</strong></p>${me.org ? `<span class="badge badge--proctored" style="margin-top:6px">${icon("building")} ${escapeHtml(me.org.name)} (${escapeHtml(me.org.status)})</span>` : ""}</div>`;
+        const st = me.stats;
+        qs("#statBand").innerHTML = [
+          ["Rooms played", st.roomsPlayed || 0], ["Rooms won", st.roomsWon || 0], ["Tournaments won", st.tournamentsWon || 0],
+          ["Duels won", st.duelsWon || 0], ["Mistakes re-solved", st.mistakesSolved || 0]
+        ].map(x => `<div class="card card--well stat"><span class="stat__num">${x[1]}</span><span class="stat__label">${x[0]}</span></div>`).join("");
+
+        /* ---------- details form ---------- */
+        qs("#pName").value = me.name; qs("#pUser").value = me.username; qs("#pEmail").value = me.email; qs("#pMobile").value = me.mobile; qs("#pBio").value = me.bio || "";
+        qs("#pLangs").innerHTML = SEED.languages.map(l => `<label class="check"><input type="checkbox" value="${escapeHtml(l.id)}" ${(me.langs || []).includes(l.id) ? "checked" : ""}><span class="check__box">${icon("check")}</span><span class="check__text">${escapeHtml(l.label)}</span></label>`).join("");
+
+        /* Nothing changes until the code is entered. It always arrives by email —
+           when the address itself changed, the code goes to the NEW one so that
+           proves ownership; otherwise it goes to the address already on file. */
+        function askForContactCode(otp) {
+          const where = escapeHtml(String(otp.sentTo || qs("#pEmail").value).trim().toLowerCase());
+          const mobileOnly = otp.provesOwnershipOf === "mobile";
+          const back = openModal(`
+            <div class="modal__head"><div class="modal__title">Confirm the new details</div></div>
+            <div class="modal__body stack">
+              <p class="small muted">${otp.mailed
+                ? `We emailed a 6-digit code to <strong>${where}</strong>.`
+                : `A 6-digit code was created for <strong>${where}</strong>, but no mail went out.`}
+                It expires in 5 minutes and your details change only once it checks out.</p>
+              ${mobileOnly ? `<p class="xs faint">No SMS gateway is attached to this build, so the code goes to the email on your account. It proves you can read that mailbox — it does not prove you own the new number.</p>` : ""}
+              ${otp.mailed === false && otp.mailError ? `<p class="small" style="color:var(--stamp)">${icon("alert")} Mail didn't go out: ${escapeHtml(otp.mailError)}</p>` : ""}
+              ${otp.devCode ? `<p class="xs faint">Dev mode is on, so the code is echoed here too: <code class="mono" style="font-weight:700">${otp.devCode}</code></p>` : ""}
+              <div class="field"><label class="label" for="cOtp">6-digit code</label><input class="input" id="cOtp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" /></div>
+              <div class="xs faint" id="cNote"></div>
+            </div>
+            <div class="modal__foot"><button class="btn btn--ghost" data-close>Cancel</button><button class="btn btn--ghost" id="cResend" disabled>Resend</button><button class="btn btn--primary" id="cOk">Confirm</button></div>`, { width: 440 });
+
+          let live = otp;
+          const tick = setInterval(() => {
+            if (!document.body.contains(back)) { clearInterval(tick); return; }
+            const left = S.resendInSecs();
+            const btn = qs("#cResend", back); if (!btn) { clearInterval(tick); return; }
+            btn.disabled = left > 0;
+            btn.textContent = left > 0 ? `Resend in ${left}s` : "Resend code";
+          }, 1000);
+
+          on(qs("#cResend", back), "click", act(async () => {
+            live = await S.resendOtp(live.otpId);
+            qs("#cNote", back).textContent = "Fresh code sent. The old one is dead.";
+          }, qs("#cResend", back)));
+
+          on(qs("#cOk", back), "click", act(async () => {
+            const code = qs("#cOtp", back).value.trim();
+            if (!/^[0-9]{6}$/.test(code)) { qs("#cNote", back).textContent = "That's not a 6-digit code."; return; }
+            await S.confirmContact(live.otpId, code);
+            closeModal(back);
+            toast("Contact details updated and re-verified.", { type: "success" });
+            location.reload();
+          }, qs("#cOk", back)));
+        }
+
+        on(qs("#detailsForm"), "submit", act(async e => {
+          e.preventDefault();
+          const form = qs("#detailsForm");
+          clearErrs(form);
+          const name = qs("#pName").value.trim();
+          const email = qs("#pEmail").value.trim().toLowerCase();
+          const mobile = qs("#pMobile").value.replace(/\D/g, "");
+          const bio = qs("#pBio").value;
+          const langs = qsa("#pLangs input:checked").map(i => i.value);
+
+          const errs = {};
+          if (name.length < 2) errs.name = "Tell us what to call you.";
+          if (!langs.length) { toast("Pick at least one language.", { type: "error" }); return; }
+          const contactChanged = email !== me.email || mobile !== me.mobile;
+          if (contactChanged) {
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errs.email = "That email doesn't look right.";
+            if (!/^[0-9]{10}$/.test(mobile)) errs.mobile = "10 digits, please.";
+          }
+          if (Object.keys(errs).length) { showErrs(errs); toast("A few fields need fixing.", { type: "error" }); return; }
+
+          await S.updateUser({ name, bio, langs });
+          if (!contactChanged) { toast("Saved.", { type: "success" }); location.reload(); return; }
+
+          askForContactCode(await S.changeContact(email, mobile));
+        }, qs("#detailsForm button[type=submit]")));
+
+        /* ---------- payout ---------- */
+        on(qs("#payMethod"), "change", e => {
+          const upi = e.target.value === "upi";
+          qs("#upiWrap").classList.toggle("hide", !upi);
+          qs("#bankWrap").classList.toggle("hide", upi);
+        });
+
+        function paintPayout() {
+          const p = me.payout;
+          const badge = !p ? '<span class="badge badge--ended">not added</span>'
+            : p.status === "verified" ? '<span class="badge badge--open">verified</span>'
+            : p.status === "flagged" ? '<span class="badge badge--live">flagged for review</span>'
+            : '<span class="badge badge--soon">pending verification</span>';
+          const held = p && p.status !== "verified" && p.holdUntil > S.now()
+            ? `<span class="xs faint">Payouts held until ${S.fmtDate(p.holdUntil)}</span>` : "";
+          qs("#payoutBadge").innerHTML = `${badge} ${held}`;
+          if (!p) return;
+          if (p.upi) {
+            qs('#payMethod input[value="upi"]').checked = true;
+            qs("#upiWrap").classList.remove("hide"); qs("#bankWrap").classList.add("hide");
+            qs("#pUpi").value = p.upi;
+          } else {
+            qs('#payMethod input[value="bank"]').checked = true;
+            qs("#upiWrap").classList.add("hide"); qs("#bankWrap").classList.remove("hide");
+            qs("#pAcct").value = p.accountNumber || ""; qs("#pIfsc").value = p.ifsc || "";
+          }
+        }
+        paintPayout();
+
+        on(qs("#payoutForm"), "submit", act(async e => {
+          e.preventDefault();
+          const form = qs("#payoutForm");
+          clearErrs(form);
+          const method = qs("#payMethod input:checked").value;
+          const errs = {};
+          let data;
+          if (method === "upi") {
+            const upi = qs("#pUpi").value.trim();
+            if (!/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(upi)) errs.upi = "That UPI ID doesn't look right.";
+            data = { upi };
+          } else {
+            const accountNumber = qs("#pAcct").value.trim();
+            const ifsc = qs("#pIfsc").value.trim().toUpperCase();
+            if (!/^[0-9]{9,18}$/.test(accountNumber)) errs.acct = "Account number looks off.";
+            if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) errs.ifsc = "IFSC is 11 chars like ABCD0123456.";
+            data = { accountNumber, ifsc };
+          }
+          if (Object.keys(errs).length) { showErrs(errs); toast("Check the payout fields.", { type: "error" }); return; }
+
+          data.holderName = me.name;
+          const saved = await S.savePayout(data);
+          me = S.currentUser(); paintPayout();
+
+          /* Name check: no live gateway is attached, so the returned name is
+             typed here instead of coming from a real penny drop. */
+          const back = openModal(`
+            <div class="modal__head"><div class="modal__title">Verify the account holder</div></div>
+            <div class="modal__body stack">
+              <p class="small muted">Saved. Payouts are held for 24 hours from now &mdash; until <strong>${S.fmtDate(saved.holdUntil)}</strong>.</p>
+              <p class="small">A real build would run a Razorpay penny drop and read the registered name back. There is no gateway attached here, so enter the name the account is registered under and we compare it with your profile name.</p>
+              <div class="field" style="margin-top:var(--sp-3)"><label class="label" for="holder">Registered name</label><input class="input" id="holder" value="${escapeHtml(me.name)}" /></div>
+              <p class="xs faint">A clear mismatch is flagged for admin review before any payout leaves the platform.</p>
+            </div>
+            <div class="modal__foot"><button class="btn btn--ghost" data-close>Later</button><button class="btn btn--primary" id="vOk">Check the name</button></div>`, { width: 460 });
+
+          on(qs("#vOk", back), "click", act(async () => {
+            const res = await S.verifyPayout(qs("#holder", back).value);
+            closeModal(back);
+            me = S.currentUser(); paintPayout();
+            if (res.match) toast("Payout details verified.", { type: "success" });
+            else toast("Name doesn't match your profile. Flagged for admin review.", { type: "error" });
+          }, qs("#vOk", back)));
+        }, qs("#payoutForm button[type=submit]")));
+
+        /* ---------- achievements ---------- */
+        qs("#achList").innerHTML = S.getAchievements().map(a => `
+          <div class="card card--flat ach ${a.unlocked ? "is-unlocked" : "is-locked"}" style="border:var(--bw) solid ${a.unlocked ? "var(--forest)" : "var(--border)"}">
+            <div class="row row--tight"><span class="ach__ic">${icon(a.icon)}</span><div><strong>${escapeHtml(a.name)}</strong><div class="xs faint">${escapeHtml(a.desc)}</div></div></div>
+            <div class="progress progress--thin" style="margin-top:var(--sp-3)"><div class="progress__fill ${a.unlocked ? "" : "progress__fill--terra"}" style="width:${a.pct}%"></div></div>
+            <div class="row row--between xs" style="margin-top:6px"><span class="faint">${a.progress}/${a.target}</span>${a.unlocked && a.unlockedAt ? `<span style="color:var(--forest);font-weight:700">earned ${S.fmtDate(a.unlockedAt)}</span>` : '<span class="faint">not yet</span>'}</div>
+          </div>`).join("") || '<p class="small faint">No badges defined yet.</p>';
+
+        /* ---------- history ---------- */
+        const rooms = S.listRooms({}).filter(r => (r.players || []).some(p => p.userId === me.id));
+        qs("#history").innerHTML = rooms.length ? rooms.map(r => {
+          const board = (r.finalBoard && r.finalBoard.length ? r.finalBoard : S.scoreboard(r.id));
+          const row = board.find(b => b.userId === me.id);
+          return `<div class="listrow"><div class="listrow__main"><div class="listrow__title">${escapeHtml(r.name)}</div><div class="listrow__sub">${S.ago(r.createdAt)} · ${escapeHtml(r.format)} · ${r.type === "tournament" ? "tournament" : "room"}</div></div>
+            <span class="row row--tight">${window.App.statusBadge(r)} ${row && row.rank ? `<strong class="mono">#${row.rank}</strong><span class="mono small">${row.score || 0}</span>` : ""}</span></div>`;
+        }).join("") : '<p class="small faint">No matches yet. Your history fills as you play.</p>';
+      });
+    })();
+  </script>
+</body>
+</html>

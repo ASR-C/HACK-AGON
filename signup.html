@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Create your account · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/auth.css" />
+</head>
+<body>
+  <div class="auth">
+    <aside class="auth__brand">
+      <a class="brand" href="index.html"><span class="brand__mark" data-ic="logo"></span><span class="brand__name">Hack<span>Agon</span></span></a>
+      <div>
+        <p class="auth__hand">no fake ranks, no fake money —</p>
+        <h1 class="auth__headline">Everyone starts at <em>zero</em>. That&rsquo;s the honest bit.</h1>
+        <ul class="auth__list" style="margin-top:var(--sp-5)">
+          <li><span class="ic" data-ic="check"></span> Rooms played, wins, rating and achievements all begin at 0 and grow only from real matches.</li>
+          <li><span class="ic" data-ic="lock"></span> We email and SMS a 6-digit code. Your account stays locked until you enter it.</li>
+          <li><span class="ic" data-ic="shield"></span> Passwords are stored as salted hashes, never plain text.</li>
+        </ul>
+      </div>
+      <div class="auth__note">Paid tournaments are 18+. We ask your date of birth once, at signup, and use it only for that check.</div>
+    </aside>
+
+    <main class="auth__form">
+      <div class="auth__card">
+        <span class="eyebrow">join the adda</span>
+        <h1>Create your account</h1>
+        <p class="auth__sub">Two minutes now, a lifetime of questionable bracket spacing later.</p>
+
+        <form id="signupForm" class="stack" novalidate>
+          <div class="field" data-f="name">
+            <label class="label" for="name">Display name <span class="req">*</span></label>
+            <input class="input" id="name" name="name" autocomplete="name" placeholder="e.g. Priya Sharma" />
+            <span class="error-text"></span>
+          </div>
+
+          <div class="grid grid-2" style="gap:var(--sp-4)">
+            <div class="field" data-f="username">
+              <label class="label" for="username">Username <span class="req">*</span></label>
+              <input class="input" id="username" name="username" autocomplete="username" placeholder="priya_codes" />
+              <span class="error-text"></span>
+            </div>
+            <div class="field" data-f="dob">
+              <label class="label" for="dob">Date of birth <span class="req">*</span></label>
+              <input class="input" id="dob" name="dob" type="date" />
+              <span class="error-text"></span>
+            </div>
+          </div>
+
+          <div class="field" data-f="email">
+            <label class="label" for="email">Email <span class="req">*</span></label>
+            <input class="input" id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" />
+            <span class="error-text"></span>
+          </div>
+
+          <div class="field" data-f="mobile">
+            <label class="label" for="mobile">Mobile number <span class="req">*</span></label>
+            <input class="input" id="mobile" name="mobile" inputmode="numeric" autocomplete="tel" placeholder="10-digit number" />
+            <span class="error-text"></span>
+          </div>
+
+          <div class="field" data-f="password">
+            <label class="label" for="password">Password <span class="req">*</span></label>
+            <input class="input" id="password" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
+            <span class="hint">We&rsquo;ll store it hashed. You keep the original.</span>
+            <span class="error-text"></span>
+          </div>
+
+          <button class="btn btn--primary btn--lg btn--block" type="submit">Send me the code</button>
+          <p class="auth__foot">We&rsquo;ll send the same 6-digit code to your email and your mobile. It expires in 5 minutes.</p>
+        </form>
+
+        <p class="auth__switch">Already one of us? <a href="login.html">Log in</a></p>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, on, toast, ICONS, act } = window.App, S = window.Store;
+      document.querySelectorAll("[data-ic]").forEach(e => { e.innerHTML = ICONS[e.dataset.ic] || ""; });
+
+      const form = qs("#signupForm");
+      const submitBtn = qs('button[type="submit"]', form);
+      function setErr(key, msg) {
+        const f = qs('[data-f="' + key + '"]', form);
+        if (!f) return;
+        f.classList.toggle("is-invalid", !!msg);
+        const t = qs(".error-text", f); if (t) t.textContent = msg || "";
+      }
+
+      on(form, "submit", act(async e => {
+        const d = {
+          name: qs("#name").value, username: qs("#username").value, email: qs("#email").value,
+          mobile: qs("#mobile").value, password: qs("#password").value, dob: qs("#dob").value
+        };
+        const local = S.validateNewUser(d);
+        ["name", "username", "email", "mobile", "password", "dob"].forEach(k => setErr(k, local[k]));
+        if (Object.keys(local).length) { toast("A couple of fields need a second look.", { type: "error" }); return; }
+
+        const age = S.ageFromDob(d.dob);
+        let r;
+        try {
+          r = await S.signup(d);
+        } catch (err) {
+          // The server re-checks uniqueness against MySQL.
+          ["name", "username", "email", "mobile", "password", "dob"].forEach(k => setErr(k, err.errs && err.errs[k]));
+          toast(err.message, { type: "error" });
+          return;
+        }
+
+        const otp = r.otp || {};
+        if (otp.mailed) {
+          toast("Account created. Your code is on its way to " + r.email + ".", {
+            type: "success",
+            detail: age < 18 ? "Heads up: paid tournaments need you to be 18+. Free rooms are open to you." : ""
+          });
+        } else if (otp.devCode) {
+          toast("Account created. Mail isn't configured, so here's your code.", { type: "dev", detail: "Code " + otp.devCode });
+        } else {
+          toast("Account created, but the code couldn't be emailed: " + (otp.mailError || "unknown mail error"), { type: "error", ms: 9000 });
+        }
+        location.href = "verify-otp.html?otp=" + encodeURIComponent(otp.otpId) + "&mode=signup";
+      }, submitBtn));
+    })();
+  </script>
+</body>
+</html>

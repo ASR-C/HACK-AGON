@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HackAgon — Host it. Fight it. Win it.</title>
+  <meta name="description" content="HackAgon is where anyone can host and join live coding contests: free practice rooms, paid tournaments with escrowed prize pools, and proctored matches." />
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .hero { padding-block: var(--sp-6) var(--sp-7); }
+    .hero__grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: var(--sp-7); align-items: center; }
+    .hero h1 { font-size: clamp(2.6rem, 6.4vw, 4.6rem); font-weight: 900; letter-spacing: -.025em; margin-block: var(--sp-3); }
+    .hero h1 em { font-style: italic; color: var(--primary); }
+    .hero__cta { display: flex; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-5); }
+    .trust { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); font-size: var(--fs-xs); color: var(--text-faint); font-weight: 600; }
+    .trust .ic { color: var(--forest); width: 18px; height: 18px; }
+
+    .cluster { position: relative; min-height: 420px; }
+    .note { position: absolute; padding: var(--sp-4); width: 232px; }
+    .note--a { top: 0; left: 4%; transform: rotate(-4deg); z-index: 3; background: var(--turmeric); }
+    .note--b { top: 128px; right: 0; transform: rotate(3deg); z-index: 2; background: var(--paper-2); }
+    .note--c { bottom: 0; left: 12%; transform: rotate(-1.5deg); z-index: 4; background: var(--forest); color: #F3F7F5; }
+    .note--c .stat__num, .note--c .stat__label { color: #F3F7F5; }
+    .note h4 { font-size: var(--fs-md); margin-bottom: var(--sp-2); }
+    .mini-board { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-xs); font-weight: 700; }
+    .mini-board div { display: flex; justify-content: space-between; gap: var(--sp-3); border-bottom: 1.5px dashed rgba(42,33,27,.25); padding-bottom: 4px; }
+    .count-chip { font-family: var(--font-display); font-weight: 900; font-size: 2rem; color: var(--primary); }
+
+    .lang-strip { border-block: var(--bw-thick) solid var(--ink); background: var(--ink); color: var(--paper); padding: var(--sp-3) 0; overflow: hidden; }
+    .lang-strip__track { display: flex; gap: var(--sp-6); align-items: center; white-space: nowrap; animation: slide 24s linear infinite; font-family: var(--font-hand); font-size: var(--fs-lg); width: max-content; }
+    .lang-strip__track span { display: inline-flex; align-items: center; gap: var(--sp-3); padding-inline: var(--sp-3); }
+    .lang-strip__track b { color: var(--turmeric); font-weight: 400; }
+    @keyframes slide { from { transform: translateX(0);} to { transform: translateX(-50%);} }
+
+    .feat-ic { display: inline-flex; width: 44px; height: 44px; }
+    .feat-ic > svg { width: 100%; height: 100%; }
+
+    .pick { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: var(--sp-4); }
+    .pick__big { display: flex; flex-direction: column; justify-content: space-between; gap: var(--sp-5); background: var(--terracotta); color: var(--on-primary); border-color: var(--ink); min-height: 320px; }
+    .pick__big h3 { color: var(--on-primary); }
+    .pick__side { display: grid; gap: var(--sp-4); }
+
+    .steps { counter-reset: s; display: grid; gap: var(--sp-4); }
+    .step { display: grid; grid-template-columns: 62px 1fr; gap: var(--sp-4); align-items: start; }
+    .step__n { counter-increment: s; width: 54px; height: 54px; border-radius: 50%; border: var(--bw-thick) solid var(--ink); background: var(--turmeric); display: grid; place-items: center; font-family: var(--font-display); font-weight: 900; font-size: 1.5rem; transform: rotate(-4deg); box-shadow: var(--sh-hard); }
+    .step__n::before { content: counter(s); }
+    .step h4 { margin-bottom: 2px; }
+
+    .split-feature { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: var(--sp-6); align-items: center; }
+    .honest { background: var(--surface-sunk); border: var(--bw) dashed var(--border-strong); border-radius: var(--r-lg); padding: var(--sp-5); }
+    .honest strong { font-family: var(--font-hand); color: var(--primary); font-size: var(--fs-md); }
+    .proctor-list li .ic { width: 20px; height: 20px; color: var(--turmeric); }
+
+    .band { background: var(--ink); color: var(--paper); border-block: var(--bw-thick) solid var(--ink); }
+    .band .wrap { display: grid; place-items: center; text-align: center; gap: var(--sp-4); padding-block: var(--sp-8); }
+    .band h2 { color: var(--paper); }
+    .band .lead { color: var(--clay); }
+
+    .footer { background: var(--paper-3); border-top: var(--bw-thick) solid var(--ink); padding-block: var(--sp-6); font-size: var(--fs-sm); }
+    .footer__grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: var(--sp-5); }
+    .footer h5 { font-family: var(--font-display); font-size: var(--fs-md); margin-bottom: var(--sp-3); }
+    .footer a { display: block; color: var(--text-muted); text-decoration: none; padding: 3px 0; }
+    .footer a:hover { color: var(--primary); }
+    .footer__legal { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: var(--bw) dashed var(--border); color: var(--text-faint); font-size: var(--fs-xs); max-width: 95ch; }
+    .count-band { display: flex; flex-wrap: wrap; gap: var(--sp-6); justify-content: center; }
+    .count-band .stat { align-items: center; }
+
+    @media (max-width: 900px) {
+      .hero__grid, .pick, .split-feature { grid-template-columns: 1fr; }
+      .cluster { min-height: 400px; margin-top: var(--sp-5); }
+      .footer__grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 480px) { .note { width: 194px; } .footer__grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <main id="main">
+    <section class="hero">
+      <div class="wrap hero__grid">
+        <div>
+          <span class="eyebrow">host it · fight it · win it</span>
+          <h1>Run your own coding contest. <em>We&rsquo;ll hold the money</em> and keep it fair.</h1>
+          <p class="lead">Practice rooms, paid tournaments with prize money in escrow, and proctored matches. You set the rules and the prize split &mdash; the platform handles the money and the integrity.</p>
+          <div class="hero__cta">
+            <a class="btn btn--primary btn--lg" href="signup.html">Start competing</a>
+            <a class="btn btn--ghost btn--lg" href="signup.html?intent=host">Host a room</a>
+          </div>
+          <div class="trust"><span class="ic" data-ic="shield"></span> Skill-only contests. No lucky draws, no spin wheels, no random prizes.</div>
+        </div>
+
+        <div class="cluster" aria-hidden="true">
+          <div class="note card--note note--a">
+            <h4>Live scoreboard</h4>
+            <div class="mini-board">
+              <div><span>1 · you</span><span>480</span></div>
+              <div><span>2 · rival</span><span>450</span></div>
+              <div><span>3 · third</span><span>310</span></div>
+            </div>
+          </div>
+          <div class="note card--sticker note--b">
+            <span class="hand" style="color:var(--primary)">Match starts in</span>
+            <div class="count-chip" id="demoCount">0:10</div>
+            <div class="row row--tight" style="margin-top:8px">
+              <span class="badge badge--proctored">webcam on</span>
+              <span class="badge badge--live">tab-lock</span>
+            </div>
+          </div>
+          <div class="note card--sticker note--c">
+            <div class="stat"><span class="stat__num">1%</span><span class="stat__label">platform fee, from the pool only</span></div>
+            <div class="stat" style="margin-top:10px"><span class="stat__num">100%</span><span class="stat__label">of entry fees held in escrow</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="lang-strip" aria-hidden="true"><div class="lang-strip__track" id="langTrack"></div></div>
+
+    <section class="section">
+      <div class="wrap">
+        <span class="eyebrow">pick your fight</span>
+        <h2 class="squiggle" style="margin-bottom:var(--sp-5)">Four ways to play</h2>
+        <div class="pick">
+          <div class="card card--sticker pick__big">
+            <div>
+              <span class="feat-ic" data-ic="trophy"></span>
+              <h3 style="margin-top:var(--sp-3)">Tournaments</h3>
+              <p style="max-width:44ch;opacity:.95">Fund a prize pool, collect entry fees into escrow, publish a fixed split, and optionally turn on proctoring. Winners are paid automatically once results lock.</p>
+            </div>
+            <div class="row">
+              <a class="btn btn--accent" href="tournaments.html">Browse tournaments</a>
+              <a class="btn btn--ghost" style="--_fg:#FBF3E7;--_bd:#FBF3E7" href="create-tournament.html">Host one</a>
+            </div>
+          </div>
+          <div class="pick__side">
+            <a class="card card--sticker tile" href="arena.html">
+              <div class="row"><span class="feat-ic" style="color:var(--primary)" data-ic="arena"></span><div class="tile__title">Arena</div></div>
+              <p class="small muted">Open rooms you can join right now &mdash; mostly free, mostly for the love of it.</p>
+            </a>
+            <a class="card card--sticker tile" href="duel.html">
+              <div class="row"><span class="feat-ic" style="color:var(--forest)" data-ic="swords"></span><div class="tile__title">Duel</div></div>
+              <p class="small muted">One versus one. Same questions, first to pass everything wins. Invite a friend or auto-match.</p>
+            </a>
+            <a class="card card--sticker tile" href="learning.html">
+              <div class="row"><span class="feat-ic" style="color:var(--turmeric-d)" data-ic="book"></span><div class="tile__title">Learning</div></div>
+              <p class="small muted">Every mistake you make is saved with the fix, plus a shelf of free books.</p>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="background:var(--surface);border-block:var(--bw) solid var(--border)">
+      <div class="wrap split-feature">
+        <div>
+          <span class="eyebrow">escrow, plainly</span>
+          <h2 class="squiggle squiggle--terra">Nobody&rsquo;s money moves until the contest is over</h2>
+          <p class="lead" style="margin-top:var(--sp-4)">Holding other people&rsquo;s prize money is serious, so the flow is boring on purpose.</p>
+          <div class="steps" style="margin-top:var(--sp-5)">
+            <div class="step"><div class="step__n"></div><div><h4>Host funds the pool</h4><p class="small muted">A paid tournament can&rsquo;t open registration until the full prize pool clears through Razorpay.</p></div></div>
+            <div class="step"><div class="step__n"></div><div><h4>Players pay entry</h4><p class="small muted">Each fee is captured and held in escrow by the platform. Entry fees carry no platform fee.</p></div></div>
+            <div class="step"><div class="step__n"></div><div><h4>Results lock</h4><p class="small muted">The host confirms, or 24 hours pass with no dispute. Only then are ranks fixed.</p></div></div>
+            <div class="step"><div class="step__n"></div><div><h4>Winners get paid</h4><p class="small muted">Automatic payouts to a verified UPI ID or bank account, after the 1% pool fee.</p></div></div>
+          </div>
+        </div>
+        <div class="stack">
+          <div class="card card--sticker">
+            <div class="card__head"><div class="card__title">Example split</div><span class="badge badge--paid">Top 3</span></div>
+            <div class="stack stack-2" id="splitDemo"></div>
+            <p class="xs faint" style="margin-top:var(--sp-3)">Prize pool ₹10,000 · platform fee ₹100 (1%) · ₹9,900 split among winners.</p>
+          </div>
+          <div class="honest">
+            <strong>Refunds are real</strong>
+            <p class="small" style="margin-top:6px">Cancel before start, or miss the minimum players, and every entry fee and the whole pool go back in full. A player eliminated for cheating gets no refund &mdash; that&rsquo;s the point.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap split-feature">
+        <div class="card card--sticker" style="background:var(--ink);color:var(--paper);border-color:var(--ink)">
+          <div class="row row--between"><span class="badge" style="background:var(--turmeric);color:var(--ink);border-color:var(--turmeric)">Tournament mode</span><span class="hand" style="color:var(--turmeric)">on by the host</span></div>
+          <h3 style="color:var(--paper);margin-block:var(--sp-4)">Webcam + tab-lock</h3>
+          <ul class="stack stack-3 proctor-list" style="color:var(--clay)">
+            <li class="row row--tight"><span class="ic" data-ic="camera"></span> Camera check before you can start; small corner preview the whole match.</li>
+            <li class="row row--tight"><span class="ic" data-ic="clock"></span> A snapshot every 20&ndash;30 seconds, visible only to the host and admins.</li>
+            <li class="row row--tight"><span class="ic" data-ic="lock"></span> Switch tab, minimise, or leave fullscreen and the match locks &mdash; for good.</li>
+            <li class="row row--tight"><span class="ic" data-ic="shield"></span> The lock lives on the server, so a refresh won&rsquo;t bring you back.</li>
+          </ul>
+        </div>
+        <div>
+          <span class="eyebrow">honest bit</span>
+          <h2 class="squiggle">We stop casual cheating. We can&rsquo;t stop all of it.</h2>
+          <p class="lead" style="margin-top:var(--sp-4)">A second device or a second person off-camera will beat any webcam. So we layer the checks and keep the host&rsquo;s right to eliminate as the final word.</p>
+          <div class="honest" style="margin-top:var(--sp-5)">
+            <strong>What we actually do</strong>
+            <p class="small" style="margin-top:6px">Snapshots on a timer, similarity checks between submissions in the same room, one active session per account, a 30-second grace period for dropped connections, and a violation log the host can review before eliminating anyone. The rules page says all of this out loud before you pay.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="background:var(--surface);border-block:var(--bw) solid var(--border)">
+      <div class="wrap">
+        <div class="row row--between" style="align-items:flex-end;margin-bottom:var(--sp-5)">
+          <div><span class="eyebrow">keep coming back</span><h2 class="squiggle squiggle--terra">Get better, not just busier</h2></div>
+        </div>
+        <div class="grid grid-3">
+          <div class="card card--sticker"><div class="feat-ic" style="color:var(--stamp)" data-ic="drop"></div><h4 style="margin-block:var(--sp-3)">My mistakes</h4><p class="small muted">Every question you failed is saved with your last code, the failing case, the correct approach, and a retry button. Empty when you join &mdash; it fills as you play.</p></div>
+          <div class="card card--sticker"><div class="feat-ic" style="color:var(--forest)" data-ic="book"></div><h4 style="margin-block:var(--sp-3)">Free library</h4><p class="small muted">Real, legally free books grouped by subject. An admin checks the licence before anything lands on the shelf.</p></div>
+          <div class="card card--sticker"><div class="feat-ic" style="color:var(--turmeric-d)" data-ic="star"></div><h4 style="margin-block:var(--sp-3)">Achievements</h4><p class="small muted">Seven of them, unlocked only from real activity. Everyone starts at zero with nothing unlocked.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--tight"><div class="wrap"><div class="count-band" id="countBand"></div></div></section>
+
+    <section class="band">
+      <div class="wrap">
+        <span class="eyebrow" style="color:var(--turmeric)">your move</span>
+        <h2>Create a room in under three minutes</h2>
+        <p class="lead" style="margin-inline:auto">Every field starts with a sensible default you can change. Name it, pick a language, pick some questions, set a timer, publish.</p>
+        <div class="row" style="justify-content:center;margin-top:var(--sp-4)">
+          <a class="btn btn--accent btn--lg" href="signup.html">Create your account</a>
+          <a class="btn btn--ghost btn--lg" style="--_fg:#FBF3E7;--_bd:#FBF3E7" href="login.html">I already have one</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer__grid">
+        <div>
+          <a class="brand" href="index.html" style="margin-bottom:var(--sp-3)"><span class="brand__mark" data-ic="logo"></span><span class="brand__name">Hack<span>Agon</span></span></a>
+          <p class="small muted" style="max-width:38ch">A single place to practice, compete and learn &mdash; where the host controls the contest and the platform controls the money and the integrity.</p>
+        </div>
+        <div><h5>Play</h5><a href="arena.html">Arena</a><a href="tournaments.html">Tournaments</a><a href="duel.html">Duel</a><a href="learning.html">Learning</a></div>
+        <div><h5>Host</h5><a href="create-room.html">Create a room</a><a href="create-tournament.html">Host a tournament</a><a href="host-dashboard.html">Host dashboard</a></div>
+        <div><h5>Account</h5><a href="signup.html">Sign up</a><a href="login.html">Log in</a><a href="profile.html">Profile &amp; payouts</a><a href="admin.html">Admin</a></div>
+      </div>
+      <p class="footer__legal">
+        Paid contests on HackAgon stay purely skill-based: same questions for everyone, ranks from correct solutions and time only, a fixed published split, and no element of luck &mdash; no lucky draws, spin wheels, raffles or random bonus prizes. Money is held in escrow and paid out through Razorpay. This front-end build demonstrates the full product; live payments, code execution (Judge0), webcam proctoring and OTP delivery require the Java back end and external services described in the PRD.
+      </p>
+    </div>
+  </footer>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, ICONS, page } = window.App, S = window.Store, SEED = S.SEED;
+      window.App.mountShell(null, { nav: false });
+
+      document.querySelectorAll("[data-ic]").forEach(e => { e.innerHTML = ICONS[e.dataset.ic] || ""; });
+
+      let t = 10; const chip = qs("#demoCount");
+      setInterval(() => {
+        t = t <= 0 ? 10 : t - 1;
+        chip.textContent = t === 0 ? "Fight!" : "0:" + String(t).padStart(2, "0");
+        chip.style.color = t === 0 ? "var(--forest)" : "var(--primary)";
+      }, 1000);
+
+      page(async () => {
+        const langs = SEED.languages.map(l => l.label);
+        const line = langs.map(l => `<span><b>&lt;/&gt;</b> ${l}</span>`).join("");
+        qs("#langTrack").innerHTML = line + line;
+
+        const pool = 1000000, fee = S.platformFee(pool), net = pool - fee;
+        const preset = SEED.prizePresets.find(p => p.id === "top3");
+        qs("#splitDemo").innerHTML = [1, 2, 3].map(r => {
+          const pct = preset.split[r] || 0;
+          return `<div class="row row--between"><span class="row row--tight">${r === 1 ? '<span class="ic" style="width:18px;height:18px;color:var(--turmeric-d)">' + ICONS.trophy + "</span>" : ""}<strong>Rank ${r}</strong> <span class="xs faint">${pct}%</span></span><strong>${S.formatInr(Math.round(net * pct / 100))}</strong></div>`;
+        }).join("");
+
+        // Real counts straight out of MySQL — no invented numbers.
+        const openRooms = S.listRooms({ status: ["open", "live"] }).length;
+        const counts = [
+          { n: SEED.languages.length, label: "languages" }, { n: SEED.topics.length, label: "topics" },
+          { n: SEED.questions.length, label: "seed questions" }, { n: SEED.books.length, label: "free books" },
+          { n: SEED.achievements.length, label: "achievements" }, { n: openRooms, label: "rooms open now" }
+        ];
+        qs("#countBand").innerHTML = counts.map(c => `<div class="stat"><span class="stat__num">${c.n}</span><span class="stat__label">${c.label}</span></div>`).join("");
+      });
+    })();
+  </script>
+</body>
+</html>

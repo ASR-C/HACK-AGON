@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Log in · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/auth.css" />
+</head>
+<body>
+  <div class="auth">
+    <aside class="auth__brand">
+      <a class="brand" href="index.html"><span class="brand__mark" data-ic="logo"></span><span class="brand__name">Hack<span>Agon</span></span></a>
+      <div>
+        <p class="auth__hand">back for another round?</p>
+        <h1 class="auth__headline">The arena kept your seat <em>warm</em>.</h1>
+        <ul class="auth__list" style="margin-top:var(--sp-5)">
+          <li><span class="ic" data-ic="arena"></span> Your open rooms and duels are exactly where you left them.</li>
+          <li><span class="ic" data-ic="book"></span> Your mistake list is waiting, patiently, with the fixes.</li>
+          <li><span class="ic" data-ic="trophy"></span> Ratings and achievements pick up where they stopped.</li>
+        </ul>
+      </div>
+      <div class="auth__note">One account, one active session per match. Sharing a login mid-contest gets the lock screen.</div>
+    </aside>
+
+    <main class="auth__form">
+      <div class="auth__card">
+        <span class="eyebrow">welcome back</span>
+        <h1>Log in</h1>
+        <p class="auth__sub">Email or username, plus your password. That&rsquo;s it.</p>
+
+        <form id="loginForm" class="stack">
+          <div class="field" data-f="identifier">
+            <label class="label" for="identifier">Email or username</label>
+            <input class="input" id="identifier" name="identifier" autocomplete="username" placeholder="you@example.com or priya_codes" required />
+            <span class="error-text"></span>
+          </div>
+          <div class="field" data-f="password">
+            <label class="label" for="password">Password</label>
+            <input class="input" id="password" name="password" type="password" autocomplete="current-password" required />
+            <span class="error-text"></span>
+          </div>
+          <div class="row row--between">
+            <button class="btn btn--primary btn--lg" type="submit">Log in</button>
+            <button class="btn btn--quiet" type="button" id="forgotBtn">Forgot password?</button>
+          </div>
+        </form>
+
+        <p class="auth__switch">New here? <a href="signup.html">Create an account</a></p>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>window.API.setToken(null);</script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, on, toast, openModal, closeModal, act, page, ICONS } = window.App, S = window.Store;
+      document.querySelectorAll("[data-ic]").forEach(e => { e.innerHTML = ICONS[e.dataset.ic] || ""; });
+      const params = new URLSearchParams(location.search);
+      const next = params.get("next") || "arena.html";
+      const submitBtn = qs('#loginForm button[type="submit"]');
+
+      on(qs("#loginForm"), "submit", act(async () => {
+        const id = qs("#identifier").value, pw = qs("#password").value;
+        let res;
+        try {
+          res = await S.login(id, pw);
+        } catch (err) {
+          qs('[data-f="password"]').classList.add("is-invalid");
+          qs('[data-f="password"] .error-text').textContent = err.message;
+          toast(err.message, { type: "error" });
+          return;
+        }
+        if (res.needVerify) {
+          const otp = res.otp || {};
+          toast(otp.mailed ? "Finish verifying first — a fresh code is in your inbox." : "Finish verifying first.", { type: "info" });
+          location.href = "verify-otp.html?otp=" + encodeURIComponent(otp.otpId) + "&mode=signup&next=" + encodeURIComponent(next);
+          return;
+        }
+        toast("Good to see you, " + res.user.name.split(" ")[0] + ".", { type: "success" });
+        location.href = next;
+      }, submitBtn));
+
+      on(qs("#forgotBtn"), "click", () => {
+        const back = openModal(`
+          <div class="modal__head"><div class="modal__title">Reset your password</div><button class="icon-btn" data-close aria-label="Close">${window.App.icon("x")}</button></div>
+          <div class="modal__body stack">
+            <p class="small muted">Enter the email on your account. We&rsquo;ll send a 6-digit code there, then let you pick a new password.</p>
+            <div class="field" data-f="femail"><label class="label" for="femail">Email</label><input class="input" id="femail" type="email" placeholder="you@example.com" /><span class="error-text"></span></div>
+          </div>
+          <div class="modal__foot"><button class="btn btn--ghost" data-close>Cancel</button><button class="btn btn--primary" id="sendReset">Send code</button></div>`, { width: 460 });
+        on(qs("#sendReset", back), "click", act(async () => {
+          const email = qs("#femail", back).value.trim().toLowerCase();
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+            qs('[data-f="femail"]', back).classList.add("is-invalid");
+            qs('[data-f="femail"] .error-text', back).textContent = "That email doesn't look right.";
+            return;
+          }
+          const r = await S.forgotPassword(email);
+          closeModal(back);
+          // The server never says whether an account exists, so keep the reply neutral.
+          if (!r.sent || !r.otp || !r.otp.otpId) {
+            toast("If that email has an account, a code is on its way.", { type: "info" });
+            return;
+          }
+          if (r.otp.retryInSecs) {
+            toast("You just asked for a code. Wait " + r.otp.retryInSecs + "s and try again.", { type: "error" });
+            return;
+          }
+          location.href = "verify-otp.html?otp=" + encodeURIComponent(r.otp.otpId) + "&mode=forgot";
+        }, qs("#sendReset", back)));
+      });
+
+      page(() => {});
+    })();
+  </script>
+</body>
+</html>

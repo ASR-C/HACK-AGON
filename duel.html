@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Duel · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .duel-grid { display: grid; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr); gap: var(--sp-5); align-items: start; }
+    .vs { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--sp-3); text-align: center; }
+    .vs__mid { font-family: var(--font-display); font-weight: 900; font-size: var(--fs-xl); color: var(--stamp); transform: rotate(-6deg); }
+    .qlist { max-height: 220px; overflow: auto; display: grid; gap: 6px; }
+    @media (max-width: 900px) { .duel-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main" class="page">
+    <div class="wrap">
+      <div class="row row--between" style="align-items:flex-end;margin-bottom:var(--sp-5);flex-wrap:wrap;gap:var(--sp-3)">
+        <div>
+          <span class="eyebrow">one on one</span>
+          <h1 class="squiggle">Duel</h1>
+          <p class="lead">Two players, same questions, first to pass everything wins &mdash; or the higher score when the clock runs out. Invite a friend or let us find you a partner.</p>
+        </div>
+      </div>
+
+      <div class="duel-grid">
+        <div class="card card--sticker">
+          <div class="card__title" style="margin-bottom:var(--sp-4)">Start a duel</div>
+          <div class="field" style="margin-bottom:var(--sp-4)">
+            <span class="label">How do you want an opponent?</span>
+            <div class="seg" id="modeSeg">
+              <label class="seg__opt"><input type="radio" name="dmode" value="auto" checked><span>Auto-match me</span></label>
+              <label class="seg__opt"><input type="radio" name="dmode" value="invite"><span>Invite by code</span></label>
+            </div>
+            <span class="hint" id="modeHint">We&rsquo;ll pair you with whoever&rsquo;s waiting. Practice duels only &mdash; never used for paid tournaments.</span>
+          </div>
+          <div class="field" style="margin-bottom:var(--sp-4)">
+            <span class="label">Pick up to 3 questions</span>
+            <div class="qlist" id="qPick"></div>
+            <div class="row row--tight" style="margin-top:8px"><button class="btn btn--sm btn--ghost" id="autoQ" type="button">Auto-pick 2</button><span class="xs faint" id="qCount"></span></div>
+          </div>
+          <div class="grid grid-2" style="margin-bottom:var(--sp-4)">
+            <div class="field"><label class="label" for="dDur">Duration (min)</label><input class="input" id="dDur" type="number" min="5" max="60" value="15" /></div>
+            <div class="field"><label class="label" for="dLang">Language</label><select class="select" id="dLang"></select></div>
+          </div>
+          <button class="btn btn--primary btn--lg btn--block" id="goBtn">Find me a fight</button>
+          <div class="hide" id="inviteBox" style="margin-top:var(--sp-4)">
+            <div class="card card--well">
+              <span class="label">Share this code</span>
+              <div class="row row--between" style="margin-top:6px"><code class="mono" id="inviteCode" style="font-size:var(--fs-lg);font-weight:700;letter-spacing:.2em"></code><button class="btn btn--sm btn--ghost" id="copyCode">Copy</button></div>
+              <p class="xs faint" style="margin-top:8px" id="waitNote">Your friend enters it in the Arena, or opens the invite link. The duel starts when both of you are in.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="stack stack-4">
+          <div class="card card--sticker">
+            <div class="card__title" style="margin-bottom:var(--sp-3)">Always-open practice duels</div>
+            <div class="stack stack-2" id="openDuels"></div>
+          </div>
+          <div class="card card--well">
+            <div class="card__title" style="margin-bottom:var(--sp-3)">How a duel is won</div>
+            <ul class="stack stack-2 small muted">
+              <li class="row row--tight"><span class="ic" style="width:18px;height:18px;color:var(--forest)" data-ic="bolt"></span> First to pass every test case on every question wins outright.</li>
+              <li class="row row--tight"><span class="ic" style="width:18px;height:18px;color:var(--forest)" data-ic="clock"></span> Otherwise the higher score at the time limit takes it.</li>
+              <li class="row row--tight"><span class="ic" style="width:18px;height:18px;color:var(--forest)" data-ic="shield"></span> Practice duels are free and unproctored by default.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, qsa, on, icon, toast, escapeHtml, roomTile, emptyState, act } = window.App, S = window.Store, SEED = S.SEED;
+      let me;
+
+      window.App.page(async () => {
+        me = window.App.requireAuth(); if (!me) return;
+        window.App.mountShell("duel");
+        document.querySelectorAll("[data-ic]").forEach(e => { e.innerHTML = icon(e.dataset.ic); });
+        await S.refreshRooms().catch(() => {});
+
+        qs("#dLang").innerHTML = SEED.languages.map(l => `<option value="${l.id}">${l.label}</option>`).join("");
+        let picked = [];
+        function renderPick() {
+          qs("#qPick").innerHTML = S.listQuestions().map(q => `<label class="check" style="padding:4px 0"><input type="checkbox" value="${q.id}" ${picked.includes(q.id) ? "checked" : ""}><span class="check__box">${icon("check")}</span><span class="check__text">${escapeHtml(q.title)} <span class="xs faint">· ${q.difficulty}</span></span></label>`).join("");
+          qs("#qCount").textContent = picked.length + "/3 selected";
+        }
+        on(qs("#qPick"), "change", e => {
+          const id = e.target.value;
+          if (e.target.checked) { if (picked.length >= 3) { e.target.checked = false; toast("Three questions max in a duel.", { type: "error" }); return; } picked.push(id); }
+          else picked = picked.filter(x => x !== id);
+          renderPick();
+        });
+        on(qs("#autoQ"), "click", () => { picked = S.listQuestions().slice(0, 2).map(q => q.id); renderPick(); });
+        renderPick();
+
+        let mode = "auto";
+        on(qs("#modeSeg"), "change", e => {
+          mode = e.target.value;
+          qs("#modeHint").textContent = mode === "auto" ? "We’ll pair you with whoever’s waiting. Practice duels only — never used for paid tournaments." : "You get a code to send to one specific person.";
+        });
+
+        function renderOpen() {
+          const duels = S.listRooms({ type: "duel", status: ["open", "live"] });
+          qs("#openDuels").innerHTML = duels.length ? duels.map(roomTile).join("") : emptyState("No open duels right now.", "Start one above and we'll find you an opponent.");
+        }
+        renderOpen();
+
+        let currentCode = "";
+        on(qs("#copyCode"), "click", () => { navigator.clipboard && navigator.clipboard.writeText(currentCode); toast("Code copied.", { type: "success" }); });
+
+        function showCode(room, note) {
+          currentCode = room.inviteCode || "";
+          qs("#inviteBox").classList.remove("hide");
+          qs("#inviteCode").textContent = currentCode || "—";
+          qs("#waitNote").textContent = note;
+        }
+
+        /* Poll until a real second player takes the seat. */
+        function waitForOpponent(roomId) {
+          qs("#goBtn").disabled = true;
+          let tries = 0;
+          const tick = setInterval(async () => {
+            tries++;
+            let r;
+            try { r = await S.fetchRoom(roomId); } catch (e) { return; }
+            if (r.players.length >= 2) {
+              clearInterval(tick);
+              toast("Opponent found. Good luck.", { type: "success" });
+              location.href = "match.html?room=" + r.id;
+            } else if (tries >= 24) {
+              clearInterval(tick);
+              qs("#goBtn").disabled = false;
+              qs("#waitNote").textContent = "Still no opponent. Leave the duel open — anyone can join with the code — or try again later.";
+            }
+          }, 5000);
+        }
+
+        on(qs("#goBtn"), "click", act(async () => {
+          if (!picked.length) { toast("Pick at least one question first.", { type: "error" }); return; }
+          const dur = Math.max(5, Math.min(60, Number(qs("#dDur").value) || 15));
+
+          if (mode === "auto") {
+            // Real matchmaking: take the open duel someone else is already waiting in.
+            await S.refreshRooms().catch(() => {});
+            const waiting = S.listRooms({ type: "duel", status: "open" })
+              .find(r => r.hostId !== me.id && r.players.length === 1 && !r.players.some(p => p.userId === me.id));
+            if (waiting) {
+              const joined = await S.joinRoom(waiting.id);
+              toast("Matched with " + (joined.players[0].name.split(" ")[0]) + ". Good luck.", { type: "success" });
+              location.href = "match.html?room=" + joined.id;
+              return;
+            }
+          }
+
+          const room = await S.createRoom({
+            type: "duel", name: me.name.split(" ")[0] + " vs " + (mode === "auto" ? "whoever's next" : "a friend"),
+            format: "Duel", size: 2, langs: [qs("#dLang").value], topics: [], questionIds: picked,
+            durationMin: dur, visibility: mode === "invite" ? "Private" : "Public",
+            tournamentMode: false, publish: true, funded: true
+          });
+
+          if (mode === "invite") {
+            showCode(room, "Send this to one person. The duel starts when they join.");
+            toast("Duel created. Send the code.", { type: "success" });
+            renderOpen();
+            waitForOpponent(room.id);
+            return;
+          }
+          showCode(room, "You're in the queue. This page checks every 5 seconds for a real opponent — no bots, so it needs another person online.");
+          toast("No one's waiting right now, so your duel is open on the board.", { type: "info" });
+          renderOpen();
+          waitForOpponent(room.id);
+        }, qs("#goBtn")));
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Match · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .match-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+    .timer { font-family: var(--font-mono); font-weight: 700; font-size: var(--fs-xl); color: var(--ink); background: var(--surface); border: var(--bw-thick) solid var(--ink); border-radius: var(--r-md); padding: .2rem .8rem; box-shadow: var(--sh-hard); }
+    .timer.warn { color: var(--stamp); border-color: var(--stamp); animation: pulse 1.2s infinite; }
+    .qnav { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+    .qnav button { min-width: 44px; height: 44px; border-radius: var(--r-md); border: var(--bw) solid var(--border-strong); background: var(--surface); font-weight: 700; font-family: var(--font-mono); }
+    .qnav button.solved { background: var(--forest); color: #F3F7F5; border-color: var(--ink); }
+    .qnav button.current { outline: 3px solid var(--turmeric); outline-offset: 2px; }
+    .match-grid { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(0,1fr); gap: var(--sp-4); align-items: start; }
+    .qcard h3 { font-size: var(--fs-lg); margin-bottom: var(--sp-2); }
+    .qcard .stmt { font-size: var(--fs-sm); color: var(--text-muted); }
+    .qcard .stmt code { font-family: var(--font-mono); background: var(--surface-sunk); padding: .1em .35em; border-radius: 4px; }
+    .sample { background: var(--surface-sunk); border-radius: var(--r-md); padding: var(--sp-3); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: pre-wrap; }
+    .lobby { display: grid; place-items: center; text-align: center; min-height: 60vh; }
+    .lobby__count { font-family: var(--font-display); font-weight: 900; font-size: clamp(3rem, 12vw, 7rem); color: var(--primary); line-height: 1; }
+    @media (max-width: 900px) { .match-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main" class="page" style="padding-bottom:var(--sp-7)">
+    <div class="wrap wrap--wide" id="matchRoot"></div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, qsa, on, el, icon, toast, money, escapeHtml, avatarHtml, emptyState, openModal, mdToHtml, act } = window.App, S = window.Store, SEED = S.SEED;
+      const id = new URLSearchParams(location.search).get("room");
+      const root = qs("#matchRoot");
+      let me, room;
+
+      const proctored = () => !!(room && room.tournamentMode);
+      const seat = () => S.getPlayer(room.id, me.id);
+      let curQ = 0, lang = "javascript", startedLocal = false, stream = null, cameraOK = false, cameraSim = false;
+      let snapTimer = null, pollTimer = null, clockTimer = null, lobbyTimer = null, graceTimer = null, lastCode = "";
+
+      /* ---------- lock screen (signature) ---------- */
+      async function showLock(reason) {
+        let logs = [];
+        try { logs = (await S.listViolations(room.id)).violations || []; } catch (e) { logs = []; }
+        document.body.insertAdjacentHTML("beforeend", `
+          <div class="lockscreen" role="alertdialog" aria-modal="true" aria-label="Match locked">
+            <div class="lockscreen__inner">
+              <div class="stamp">Caught</div>
+              <h2>This match is over for you.</h2>
+              <p>${escapeHtml(reason || "A tab-lock rule was broken.")} The lock is stored in MySQL &mdash; refreshing or logging back in won&rsquo;t reopen the match. Your host can review the log and snapshots.</p>
+              ${logs.length ? `<div class="violation-log">${logs.filter(v => v.userId === me.id).map(v => new Date(v.at).toLocaleTimeString() + "  ·  " + v.type).join("\n")}</div>` : ""}
+              <a class="btn btn--ghost" style="--_fg:#F6EDE0;--_bd:#F6EDE0" href="arena.html">Back to the Arena</a>
+            </div>
+          </div>`);
+      }
+
+      /* ---------- countdown (signature) ---------- */
+      function countdown(done) {
+        const seq = ["3", "2", "1", "Fight!"];
+        const ov = el('<div class="countdown"><div class="countdown__num">3</div><div class="countdown__hint">hands on keyboards</div></div>');
+        document.body.appendChild(ov);
+        const num = qs(".countdown__num", ov);
+        let i = 0;
+        const t = setInterval(() => {
+          i++;
+          if (i >= seq.length) { clearInterval(t); ov.remove(); done(); return; }
+          num.textContent = seq[i];
+          num.classList.toggle("fight", seq[i] === "Fight!");
+        }, 800);
+      }
+
+      /* ---------- proctoring ---------- */
+      async function initCamera() {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          cameraOK = true; cameraSim = false;
+          const pip = qs("#pip"); if (pip) { qs("video", pip).srcObject = stream; qs(".proctor-pip__dot", pip).classList.remove("off"); }
+          await S.setCamera(room.id, "ok");
+          return true;
+        } catch (e) {
+          cameraOK = false;
+          await S.setCamera(room.id, "denied").catch(() => {});
+          return false;
+        }
+      }
+
+      /* One JPEG frame from the camera element, posted to the server for the host. */
+      function grabFrame() {
+        const v = qs("#pip video");
+        if (!stream || !v || !v.videoWidth) return null;
+        const c = document.createElement("canvas");
+        c.width = 320; c.height = Math.round(320 * v.videoHeight / v.videoWidth);
+        c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+        return c.toDataURL("image/jpeg", 0.6);
+      }
+      function startSnapshots() {
+        if (snapTimer) clearInterval(snapTimer);
+        const every = Math.max(5, room.snapshotSecs || 25) * 1000;
+        const shoot = async () => {
+          const frame = grabFrame();
+          if (!frame) return;
+          try { await S.recordSnapshot(room.id, frame); } catch (e) { /* keep playing; the host sees the gap */ }
+        };
+        shoot();
+        snapTimer = setInterval(shoot, every);
+      }
+      function armTabLock() {
+        let fired = false;
+        const violate = async (type) => {
+          if (fired || S.isLocked(room.id, me.id)) return;
+          fired = true;
+          stopAll();
+          try { await S.recordViolation(room.id, type); } catch (e) { /* still lock locally */ }
+          showLock("Tab-lock violation: " + type + ".");
+        };
+        document.addEventListener("visibilitychange", () => { if (document.hidden) violate("tab-switch"); });
+        window.addEventListener("blur", () => violate("blur"));
+        document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && startedLocal) violate("exit-fullscreen"); });
+        document.addEventListener("contextmenu", e => { if (startedLocal) { e.preventDefault(); violate("context-menu"); } });
+        ["copy", "cut", "paste"].forEach(ev => document.addEventListener(ev, e => { if (startedLocal) { e.preventDefault(); violate(ev); } }));
+        window.addEventListener("offline", () => { graceTimer = setTimeout(() => violate("other"), 30000); });
+        window.addEventListener("online", () => { if (graceTimer) clearTimeout(graceTimer); });
+      }
+
+      function stopAll() {
+        [snapTimer, pollTimer, clockTimer, lobbyTimer].forEach(t => t && clearInterval(t));
+        snapTimer = pollTimer = clockTimer = lobbyTimer = null;
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      }
+
+      /* ---------- LOBBY ---------- */
+      function renderLobby() {
+        const startIn = room.startTime ? room.startTime - S.now() : null;
+        root.innerHTML = `
+          <div class="lobby">
+            <div>
+              <span class="eyebrow">${escapeHtml(room.name)}</span>
+              <h1 style="margin-block:var(--sp-3)">Waiting room</h1>
+              <p class="lead" style="margin-inline:auto"><span id="seatCount">${room.players.length} of ${room.size}</span> seats taken. ${proctored() ? "Camera and tab-lock will be on." : "No proctoring on this one."}</p>
+              <div class="lobby__count" id="lobbyCount">${startIn != null && startIn > 0 ? S.fmtDuration(startIn) : "any moment"}</div>
+              <p class="hand muted" style="margin-top:var(--sp-3)">${room.hostId === me.id ? "you're the host — start it from the dashboard" : "starts when the host opens the floor"}</p>
+              ${proctored() ? `<div style="margin-top:var(--sp-5)"><button class="btn btn--primary btn--lg" id="camBtn">${icon("camera")} Allow camera to get ready</button><p class="xs faint" style="margin-top:8px">You can't start a proctored match without it.</p><button class="btn btn--quiet xs" id="camDemo" style="margin-top:6px">No camera here? run without one (stored as unverified)</button></div>` : ""}
+            </div>
+          </div>`;
+
+        const paintClock = () => {
+          const left = room.startTime ? room.startTime - S.now() : null;
+          const c = qs("#lobbyCount"); if (c) c.textContent = room.status === "live" ? "Fight!" : (left != null && left > 0 ? S.fmtDuration(left) : "any moment");
+        };
+        clockTimer = setInterval(paintClock, 1000);
+        lobbyTimer = setInterval(async () => {
+          try { room = await S.fetchRoom(room.id); } catch (e) { return; }
+          const sc = qs("#seatCount"); if (sc) sc.textContent = room.players.length + " of " + room.size;
+          if (room.status === "live") { clearInterval(lobbyTimer); clearInterval(clockTimer); begin(); }
+          else if (room.status === "ended") { stopAll(); renderEnded(); }
+        }, 3000);
+
+        const camBtn = qs("#camBtn");
+        if (camBtn) on(camBtn, "click", act(async () => {
+          const ok = await initCamera();
+          if (ok) { toast("Camera ready.", { type: "success" }); camBtn.textContent = "Camera ready"; camBtn.disabled = true; }
+          else toast("We couldn't reach a camera. You can run without one, but the host sees it as unverified.", { type: "error" });
+        }, camBtn));
+        const camDemo = qs("#camDemo");
+        if (camDemo) on(camDemo, "click", async () => {
+          cameraOK = true; cameraSim = true;
+          await S.setCamera(room.id, "pending").catch(() => {});
+          toast("Running without a camera. The host's log shows your camera as pending, and no snapshots are stored.", { type: "dev" });
+          camDemo.remove();
+        });
+      }
+
+      /* ---------- LIVE ---------- */
+      function begin() {
+        if (proctored() && !cameraOK) { renderLobby(); toast("Camera first, then we start.", { type: "error" }); return; }
+        startedLocal = true;
+        countdown(() => { renderLive(); if (proctored() && !cameraSim) startSnapshots(); if (proctored()) armTabLock(); });
+      }
+
+      function renderLive() {
+        const qsIds = room.questionIds || [];
+        root.innerHTML = `
+          <div class="match-top">
+            <div>
+              <div class="row row--tight">${window.App.statusBadge(room)} ${proctored() ? '<span class="badge badge--proctored">' + icon("camera") + ' proctored</span>' : ''}</div>
+              <h2 style="margin-top:4px">${escapeHtml(room.name)}</h2>
+            </div>
+            <div class="row">
+              <div class="qnav" id="qnav"></div>
+              <div class="timer" id="timer">--:--</div>
+            </div>
+          </div>
+          <div class="match-grid">
+            <div class="stack stack-4">
+              <div class="card card--sticker qcard" id="qcard"></div>
+              <div class="editor">
+                <div class="editor__bar">
+                  <div class="editor__lang">${icon("code")}<select id="langSel">${(room.langs || []).map(l => `<option value="${l}" ${l === lang ? "selected" : ""}>${(SEED.languages.find(x => x.id === l) || {}).label || l}</option>`).join("")}</select></div>
+                  <div class="row row--tight">
+                    <button class="btn btn--sm btn--ghost" id="hintBtn">${icon("bolt")} Hint</button>
+                    <button class="btn btn--sm btn--accent" id="submitBtn">${icon("play")} Run tests</button>
+                  </div>
+                </div>
+                <div class="editor__body"><div class="editor__gutter" id="gutter">1</div><textarea id="code" spellcheck="false" aria-label="code editor"></textarea></div>
+              </div>
+              <div class="judge" id="judge"><div class="judge__row"><span class="faint small">Run your code to see pass / fail per hidden test case. Tests run on the server &mdash; they never ship to your browser.</span></div></div>
+              <div id="coachBox"></div>
+            </div>
+            <aside class="stack stack-4">
+              <div class="card card--sticker">
+                <div class="card__title" style="margin-bottom:var(--sp-3)">Live scoreboard</div>
+                <div id="board" class="stack stack-2"></div>
+              </div>
+              <div class="card card--well small" id="proctorStatus"></div>
+            </aside>
+          </div>
+          ${proctored() ? `<div class="proctor-pip" id="pip"><video autoplay muted playsinline></video><div class="proctor-pip__bar"><span>PROCTOR</span><span class="proctor-pip__dot ${cameraOK && !cameraSim ? "" : "off"}"></span></div></div>` : ""}`;
+
+        // editor starter
+        const ta = qs("#code");
+        ta.value = S.starterFor(S.getQuestion(qsIds[curQ]), lang);
+        syncGutter();
+        on(ta, "input", syncGutter);
+        on(ta, "keydown", e => { if (e.key === "Tab") { e.preventDefault(); const s = ta.selectionStart; ta.value = ta.value.slice(0, s) + "    " + ta.value.slice(ta.selectionEnd); ta.selectionStart = ta.selectionEnd = s + 4; syncGutter(); } });
+        function syncGutter() { const n = ta.value.split("\n").length; qs("#gutter").innerHTML = Array.from({ length: n }, (_, i) => i + 1).join("<br>"); }
+        on(qs("#langSel"), "change", e => { lang = e.target.value; ta.value = S.starterFor(S.getQuestion(qsIds[curQ]), lang); syncGutter(); });
+
+        renderQ(); renderBoard();
+        pollTimer = setInterval(async () => {
+          try { room = await S.fetchRoom(room.id); } catch (e) { return; }
+          renderBoard();
+          if (room.status === "ended") { stopAll(); renderEnded(); return; }
+          const p = seat();
+          if (p && p.locked) { stopAll(); showLock(p.lockReason); }
+          checkEnd();
+        }, 3000);
+        clockTimer = setInterval(tickClock, 500);
+        tickClock();
+      }
+
+      function tickClock() {
+        const t = qs("#timer"); if (!t) return;
+        const end = (room.startTime || S.now()) + room.durationMin * 60000;
+        const left = end - S.now();
+        t.textContent = left > 0 ? S.fmtDuration(left) : "0:00";
+        t.classList.toggle("warn", left < 60000 && left > 0);
+        if (left <= 0) checkEnd(true);
+      }
+      function timeUp() { return S.now() >= (room.startTime || S.now()) + room.durationMin * 60000; }
+      async function checkEnd(force) {
+        if (!force && !timeUp()) return;
+        if (room.status === "ended") { renderEnded(); return; }
+        if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
+        // Only the host can lock results; everyone else watches the board until it freezes.
+        if (room.hostId === me.id) { try { await S.finaliseRoom(room.id); } catch (e) { /* the dashboard can close it too */ } }
+        renderEnded();
+      }
+
+      function renderQ() {
+        const q = S.getQuestion((room.questionIds || [])[curQ]);
+        if (!q) return;
+        qs("#qcard").innerHTML = `
+          <div class="row row--between"><div class="row row--tight">${window.App.diffPill(q.difficulty)}<span class="tag">${q.points} pts</span><span class="tag">${q.caseCount} hidden tests</span></div><span class="xs faint">Q${curQ + 1} of ${room.questionIds.length}</span></div>
+          <h3 style="margin-top:var(--sp-3)">${escapeHtml(q.title)}</h3>
+          <p class="stmt" style="margin-block:var(--sp-3)">${q.statement}</p>
+          <div class="stack stack-2">${(q.samples || []).map(s => `<div class="sample"><strong>Input</strong>  ${escapeHtml(s.input)}\n<strong>Output</strong> ${escapeHtml(s.output)}\n<span class="faint">${escapeHtml(s.why)}</span></div>`).join("")}</div>
+          <div class="row row--tight" style="margin-top:var(--sp-3)">${q.topics.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>`;
+        // qnav
+        const p = seat();
+        qs("#qnav").innerHTML = (room.questionIds || []).map((qid, i) => `<button class="${(p && p.solved || []).includes(qid) ? "solved" : ""} ${i === curQ ? "current" : ""}" data-q="${i}">${i + 1}</button>`).join("");
+        qsa("#qnav button").forEach(b => on(b, "click", () => { curQ = +b.dataset.q; loadCode(); renderQ(); }));
+        qs("#coachBox").innerHTML = "";
+      }
+      function loadCode() {
+        const ta = qs("#code");
+        ta.value = S.starterFor(S.getQuestion((room.questionIds || [])[curQ]), lang);
+        qs("#gutter").innerHTML = ta.value.split("\n").map((_, i) => i + 1).join("<br>");
+        qs("#judge").innerHTML = '<div class="judge__row"><span class="faint small">Run your code to see pass / fail per hidden test case. Tests run on the server &mdash; they never ship to your browser.</span></div>';
+      }
+
+      /* ---------- judge + AI coach (Groq) ---------- */
+      async function submitRun() {
+        const q = S.getQuestion((room.questionIds || [])[curQ]);
+        const code = qs("#code").value;
+        lastCode = code;
+        qs("#judge").innerHTML = '<div class="judge__row"><span class="judge__status pending">…</span> judged on the server</div>';
+        qs("#coachBox").innerHTML = "";
+        const res = await S.submitCode(room.id, q.id, lang, code);
+        room = S.getRoom(room.id) || room;
+        if (res.board) room.board = res.board;
+        const v = res.verdict;
+        if (v.compileError) {
+          qs("#judge").innerHTML = `<div class="judge__row"><span class="judge__status fail">error</span> ${escapeHtml(v.compileError)}</div>`;
+        } else {
+          qs("#judge").innerHTML = v.results.map(r => `<div class="judge__row"><span class="judge__status ${r.pass ? "pass" : "fail"}">${r.pass ? "pass" : "fail"}</span><span class="small">Test case ${r.i + 1}</span><span class="xs faint" style="margin-left:auto">${r.pass ? "" : (r.error ? escapeHtml(String(r.error).slice(0, 60)) : "wrong answer")}</span></div>`).join("")
+            + `<div class="judge__row"><strong class="small">${v.passed}/${v.total} passed</strong><span class="xs faint" style="margin-left:auto">${v.timeMs} ms${v.simulated ? " · simulated judge (non-JS)" : ""}${res.scored ? " · +" + res.scored.gained + " pts" : ""}</span></div>`;
+        }
+        renderBoard(); renderQ();
+        if (v.ok) {
+          toast("All cases passed. Nice.", { type: "success" });
+          if (curQ < room.questionIds.length - 1) { curQ++; loadCode(); renderQ(); }
+        } else {
+          qs("#judge").insertAdjacentHTML("beforeend", `<div class="judge__row"><button class="btn btn--sm btn--ghost" id="explainBtn" style="margin-left:auto">${icon("bolt")} Ask the coach why</button></div>`);
+        }
+      }
+
+      async function hintRun() {
+        const q = S.getQuestion((room.questionIds || [])[curQ]);
+        const box = qs("#coachBox");
+        box.innerHTML = `<div class="ai-box"><div class="ai-box__head">${icon("bolt")} Coach is thinking…</div></div>`;
+        const r = await S.aiHint(q.id);
+        box.innerHTML = `<div class="ai-box"><div class="ai-box__head">${icon("bolt")} Coach hint <span class="xs faint" style="margin-left:auto">${escapeHtml(r.model || "")}</span></div>${mdToHtml(r.hint)}</div>`;
+      }
+
+      async function explainRun() {
+        const q = S.getQuestion((room.questionIds || [])[curQ]);
+        const box = qs("#coachBox");
+        box.innerHTML = `<div class="ai-box"><div class="ai-box__head">${icon("bolt")} Coach is reading your submission…</div></div>`;
+        const r = await S.aiExplain(q.id, lang, lastCode || qs("#code").value);
+        box.innerHTML = `<div class="ai-box"><div class="ai-box__head">${icon("bolt")} Coach review <span class="xs faint" style="margin-left:auto">${r.verdict.passed}/${r.verdict.total} cases</span></div>${mdToHtml(r.explanation)}</div>`;
+      }
+
+      on(document, "click", e => {
+        const b = e.target.closest("#submitBtn, #hintBtn, #explainBtn");
+        if (!b) return;
+        const fn = b.id === "submitBtn" ? submitRun : b.id === "hintBtn" ? hintRun : explainRun;
+        act(fn, b)();
+      });
+
+      function renderBoard() {
+        const board = room.board && room.board.length ? room.board : S.scoreboard(room.id);
+        qs("#board").innerHTML = board.length ? board.map(row => `
+          <div class="row row--between ${row.userId === me.id ? "is-me" : ""}" style="padding:6px 8px;border-radius:8px;${row.userId === me.id ? "background:color-mix(in srgb,var(--terracotta) 12%,transparent)" : ""}">
+            <span class="row row--tight">${avatarHtml(row, "sm")}<span class="small"><span class="rank mono">${row.rank}</span> ${escapeHtml(row.name)}</span></span>
+            <strong class="mono">${row.score}</strong>
+          </div>`).join("") : '<p class="xs faint">No one on the board yet.</p>';
+        const ps = qs("#proctorStatus");
+        if (ps) ps.innerHTML = proctored()
+          ? `<div class="row row--tight" style="margin-bottom:6px">${icon("camera")}<strong>Proctoring on</strong></div><p class="xs muted">${cameraSim ? "No camera on this device, so nothing is being recorded and the host sees your camera as pending." : `Snapshot every ${room.snapshotSecs}s, stored on the server.`} Keep this tab focused and fullscreen. One violation ends your match and the lock is stored server-side.</p>`
+          : `<div class="row row--tight" style="margin-bottom:6px">${icon("shield")}<strong>No proctoring</strong></div><p class="xs muted">Tournament mode is off, so no camera or tab checks run here.</p>`;
+      }
+
+      /* ---------- ENDED / win screen ---------- */
+      async function renderEnded() {
+        stopAll();
+        try { room = await S.fetchRoom(room.id); } catch (e) { /* keep what we have */ }
+        const locked = room.status === "ended" || room.resultsLocked;
+        const board = room.finalBoard && room.finalBoard.length ? room.finalBoard
+          : (room.board && room.board.length ? room.board : S.scoreboard(room.id));
+        const meRow = board.find(b => b.userId === me.id);
+        const won = locked && meRow && meRow.rank === 1;
+        root.innerHTML = `
+          <div class="wrap--narrow" style="max-width:760px;margin-inline:auto">
+            <div class="center" style="margin-bottom:var(--sp-5)">
+              <span class="eyebrow">final whistle</span>
+              <h1 class="squiggle">${escapeHtml(room.name)} — results</h1>
+              ${locked ? "" : `<p class="small" style="margin-top:var(--sp-3)"><strong>Time's up.</strong> Waiting for the host to lock the results — this board refreshes itself.</p>`}
+              ${S.isLocked(room.id, me.id) ? `<p class="small" style="margin-top:var(--sp-3);color:var(--stamp)"><strong>You were locked out of this match.</strong> The board below is final; if the lock was wrong, dispute it and an admin will read the snapshots.</p>` : ""}
+            </div>
+            <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Player</th><th>Solved</th><th>Score</th></tr></thead><tbody>
+              ${board.map(b => `<tr class="${b.userId === me.id ? "is-me" : ""}"><td class="rank">${b.rank}</td><td>${escapeHtml(b.name)}</td><td>${(b.solved || []).length}/${room.questionIds.length}</td><td class="mono">${b.score}</td></tr>`).join("")}
+            </tbody></table></div>
+            ${room.type === "tournament" && room.prizePoolPaise ? `
+              <div class="card card--note" style="margin-top:var(--sp-5)" id="disputeCard">
+                <div class="row row--between" style="flex-wrap:wrap;gap:var(--sp-3)">
+                  <div><strong>Something wrong with these results?</strong><p class="small muted" style="margin:4px 0 0">A dispute freezes payouts for everyone until an admin reviews the logs and snapshots.</p></div>
+                  <button class="btn btn--ghost" id="disputeBtn">${icon("flag")} Dispute these results</button>
+                </div>
+              </div>` : ""}
+            <div class="row" style="justify-content:center;margin-top:var(--sp-5)">
+              <a class="btn btn--primary" href="arena.html">Back to the Arena</a>
+              <a class="btn btn--ghost" href="learning.html">Review my mistakes</a>
+            </div>
+          </div>`;
+        if (room.payoutBlocked) paintDisputeOpen();
+        if (!locked) {
+          lobbyTimer = setInterval(async () => {
+            try { room = await S.fetchRoom(room.id); } catch (e) { return; }
+            if (room.status === "ended" || room.resultsLocked) renderEnded();
+          }, 3000);
+        }
+        const db = qs("#disputeBtn");
+        if (db) on(db, "click", () => {
+          const back = openModal(`
+            <div class="modal__head"><div class="modal__title">Dispute these results</div><button class="icon-btn" data-close aria-label="Close">${icon("x")}</button></div>
+            <div class="modal__body">
+              <p class="small muted">Tell the admins exactly what looks wrong. Payouts for this tournament freeze until it's resolved &mdash; including yours, so only raise it if it matters.</p>
+              <div class="field"><label class="label" for="dspReason">What happened? <span class="req">*</span></label><textarea class="textarea" id="dspReason" rows="4" placeholder="e.g. I was locked out at 21:04 but my snapshot shows the same room throughout."></textarea></div>
+            </div>
+            <div class="modal__foot"><button class="btn btn--ghost" data-close>Cancel</button><button class="btn btn--danger" id="dspGo">${icon("send")} Raise dispute</button></div>`, { width: 560 });
+          on(qs("#dspGo", back), "click", act(async () => {
+            const reason = qs("#dspReason", back).value.trim();
+            if (reason.length < 10) { qs("#dspReason", back).classList.add("is-invalid"); toast("Give the admins something to work with — a sentence at least.", { type: "error" }); return; }
+            await S.raiseDispute(room.id, reason);
+            window.App.closeModal(back);
+            toast("Dispute raised. Payouts are frozen until an admin reviews it.", { type: "info" });
+            try { room = await S.fetchRoom(room.id); } catch (e) { }
+            paintDisputeOpen();
+          }, qs("#dspGo", back)));
+        });
+        if (won) {
+          document.body.insertAdjacentHTML("beforeend", `
+            <div class="winscreen"><div class="cert">
+              <div class="cert__seal">${icon("trophy").replace('class="ic"', 'style="width:92px;height:92px;color:var(--turmeric-d)"')}</div>
+              <div class="cert__rank">#1</div>
+              <h2>You took ${escapeHtml(room.name)}</h2>
+              <p class="small muted">${(meRow.solved || []).length} of ${room.questionIds.length} solved · ${meRow.score} points. Added to your record.</p>
+              <button class="btn btn--primary" style="margin-top:var(--sp-4)" onclick="this.closest('.winscreen').remove()">On to the next one</button>
+            </div></div>`);
+        }
+      }
+      function paintDisputeOpen() {
+        const card = qs("#disputeCard"); if (!card) return;
+        card.innerHTML = `<div class="row row--tight">${icon("alert")}<div><strong>A dispute is open on these results.</strong><p class="small muted" style="margin:4px 0 0">Payouts stay frozen until an admin resolves it. You'll see the money land in your profile once it's settled.</p></div></div>`;
+      }
+
+      /* ---------- boot ---------- */
+      window.App.page(async () => {
+        me = window.App.requireAuth(); if (!me) return;
+        window.App.mountShell(null, { nav: false });
+
+        try { room = id ? await S.fetchRoom(id) : null; } catch (e) { room = null; }
+        if (!room) { root.innerHTML = emptyState("No match at this address.", "The room may have ended or the link is off.", '<a class="btn btn--primary" href="arena.html">Back to the Arena</a>'); return; }
+
+        // hosts spectate from the dashboard — unless they're playing, as in a duel they created
+        if (room.hostId === me.id && !seat()) { location.href = "host-dashboard.html?room=" + room.id; return; }
+        if (room.type === "tournament" && !seat()) { location.href = "tournament-details.html?room=" + room.id; return; }
+        if (!seat()) {
+          if (room.entryFeePaise > 0) { location.href = "tournament-details.html?room=" + room.id; return; }
+          try { room = await S.joinRoom(room.id); } catch (e) { toast(e.message, { type: "error" }); }
+        }
+        lang = (room.langs || [])[0] || "javascript";
+
+        if (S.isLocked(room.id, me.id) && room.status !== "ended") { await showLock((seat() || {}).lockReason); return; }
+        if (room.status === "live") { if (proctored()) { await initCamera().catch(() => false); } begin(); }
+        else if (room.status === "ended") { await renderEnded(); }
+        else renderLobby();
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Learning · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .mistake { border-left: 6px solid var(--stamp); }
+    .mistake.is-solved { border-left-color: var(--forest); opacity: .85; }
+    .book { display: flex; gap: var(--sp-4); align-items: flex-start; }
+    .book__spine { width: 12px; align-self: stretch; border-radius: 4px; background: var(--terracotta); flex: none; }
+    .book:nth-child(3n) .book__spine { background: var(--forest); }
+    .book:nth-child(3n+1) .book__spine { background: var(--turmeric); }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main" class="page">
+    <div class="wrap">
+      <div class="row row--between" style="align-items:flex-end;margin-bottom:var(--sp-5);flex-wrap:wrap;gap:var(--sp-3)">
+        <div>
+          <span class="eyebrow">the shelf &amp; the scar tissue</span>
+          <h1 class="squiggle">Learning</h1>
+          <p class="lead">Everything you got wrong, kept with the fix &mdash; and a library of books that are actually free.</p>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab is-active" id="tabMistakes" role="tab" aria-selected="true">My mistakes</button>
+        <button class="tab" id="tabLibrary" role="tab" aria-selected="false">Library</button>
+      </div>
+
+      <section id="paneMistakes" class="section section--tight">
+        <div id="mistakeList" class="stack stack-4"></div>
+      </section>
+
+      <section id="paneLibrary" class="section section--tight hide">
+        <div id="library" class="stack stack-6"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, on, icon, toast, escapeHtml, emptyState, diffPill, openModal, closeModal, mdToHtml, act } = window.App, S = window.Store, SEED = S.SEED;
+      let me;
+
+      window.App.page(async () => {
+        me = window.App.requireAuth(); if (!me) return;
+        window.App.mountShell("learning");
+
+        on(qs("#tabMistakes"), "click", () => switchTab("m"));
+        on(qs("#tabLibrary"), "click", () => switchTab("l"));
+
+        await S.fetchMistakes().catch(() => {});
+        renderMistakes(); renderLibrary();
+      });
+
+      function switchTab(t) {
+        qs("#tabMistakes").classList.toggle("is-active", t === "m"); qs("#tabMistakes").setAttribute("aria-selected", t === "m");
+        qs("#tabLibrary").classList.toggle("is-active", t === "l"); qs("#tabLibrary").setAttribute("aria-selected", t === "l");
+        qs("#paneMistakes").classList.toggle("hide", t !== "m");
+        qs("#paneLibrary").classList.toggle("hide", t !== "l");
+      }
+
+      /* ---------- My mistakes ---------- */
+      function renderMistakes() {
+        const list = S.listMistakes();
+        const box = qs("#mistakeList");
+        if (!list.length) {
+          box.innerHTML = emptyState("Nothing here yet. Lovely, really.", "Every question you fail in a room, duel or practice lands here with your last code, the failing case and the right approach. Go lose something first.", '<a class="btn btn--primary" href="arena.html">Find a room</a>');
+          return;
+        }
+        box.innerHTML = list.map(m => {
+          const q = S.getQuestion(m.questionId); if (!q) return "";
+          return `<div class="card card--sticker mistake ${m.solved ? "is-solved" : ""}">
+            <div class="row row--between" style="align-items:flex-start;gap:var(--sp-3);flex-wrap:wrap">
+              <div>
+                <div class="row row--tight">${diffPill(q.difficulty)} ${m.solved ? '<span class="badge badge--open">solved since</span>' : '<span class="badge badge--live">needs retry</span>'}</div>
+                <h3 style="font-size:var(--fs-lg);margin-top:6px">${escapeHtml(q.title)}</h3>
+                <p class="xs faint">${S.ago(m.at)} · ${escapeHtml(q.topics.join(", "))}</p>
+              </div>
+              <div class="row row--tight">
+                <button class="btn btn--ghost btn--sm" data-coach="${m.id}">${icon("bolt")} Ask the coach</button>
+                <button class="btn btn--primary btn--sm" data-retry="${m.id}">${icon("refresh")} Retry</button>
+              </div>
+            </div>
+            <div class="grid grid-2" style="margin-top:var(--sp-4);gap:var(--sp-4)">
+              <div>
+                <span class="label xs">Your last code</span>
+                <pre class="sample" style="margin-top:6px;max-height:150px;overflow:auto">${escapeHtml((m.lastCode || "").slice(0, 600))}</pre>
+              </div>
+              <div>
+                <span class="label xs">Where it broke</span>
+                <p class="small muted" style="margin-top:6px">${m.failingCase ? "Test case " + (m.failingCase.i + 1) + " failed." : "You didn't finish this one in time."}</p>
+                <span class="label xs" style="display:block;margin-top:var(--sp-3)">The right approach</span>
+                <p class="small muted" style="margin-top:6px">${escapeHtml(q.approach || "The editorial for this one isn't written yet.")}</p>
+              </div>
+            </div>
+            <div id="coach-${m.id}"></div>
+          </div>`;
+        }).join("");
+      }
+
+      on(qs("#mistakeList"), "click", e => {
+        const cb = e.target.closest("[data-coach]");
+        if (cb) return coachFor(cb);
+        const b = e.target.closest("[data-retry]"); if (!b) return;
+        const m = S.listMistakes().find(x => x.id === b.dataset.retry); if (!m) return;
+        const q = S.getQuestion(m.questionId);
+        const lang = (q.languages || [])[0];
+        const back = openModal(`
+          <div class="modal__head"><div class="modal__title">Retry: ${escapeHtml(q.title)}</div><button class="icon-btn" data-close aria-label="Close">${icon("x")}</button></div>
+          <div class="modal__body">
+            <p class="small muted" style="margin-bottom:var(--sp-3)">${q.statement}</p>
+            <div class="editor"><div class="editor__bar"><div class="editor__lang">${icon("code")}<span class="mono xs" style="color:var(--clay)">${(SEED.languages.find(l => l.id === lang) || {}).label || lang}</span></div></div>
+            <div class="editor__body"><textarea id="retryCode" spellcheck="false">${escapeHtml(m.lastCode || S.starterFor(q, lang))}</textarea></div></div>
+            <div class="judge" id="retryJudge" style="margin-top:var(--sp-3)"></div>
+          </div>
+          <div class="modal__foot"><button class="btn btn--ghost" data-close>Close</button><button class="btn btn--accent" id="retryRun">${icon("play")} Run tests</button></div>`, { width: 720 });
+        on(qs("#retryRun", back), "click", act(async () => {
+          const res = await S.practice(q.id, lang, qs("#retryCode", back).value);
+          const v = res.verdict;
+          qs("#retryJudge", back).innerHTML = (v.compileError
+            ? `<div class="judge__row"><span class="judge__status fail">error</span> ${escapeHtml(v.compileError)}</div>`
+            : v.results.map(r => `<div class="judge__row"><span class="judge__status ${r.pass ? "pass" : "fail"}">${r.pass ? "pass" : "fail"}</span><span class="small">Test case ${r.i + 1}</span></div>`).join("")
+              + `<div class="judge__row"><strong class="small">${v.passed}/${v.total} passed</strong><span class="xs faint" style="margin-left:auto">${v.simulated ? "simulated judge (non-JS)" : ""}</span></div>`);
+          if (v.ok) {
+            closeModal(back);
+            toast(res.mistakeSolved ? "Nailed it this time. That one's off the list." : "All cases passed.", { type: "success" });
+            if ((res.newAchievements || []).length) toast("New badge: " + res.newAchievements.map(a => a.name || a.id).join(", "), { type: "success" });
+            await S.fetchMistakes().catch(() => {});
+            renderMistakes();
+          }
+        }, qs("#retryRun", back)));
+      });
+
+      /* ---------- AI coach (Groq) ---------- */
+      function coachFor(btn) {
+        const m = S.listMistakes().find(x => x.id === btn.dataset.coach); if (!m) return;
+        const q = S.getQuestion(m.questionId);
+        const box = qs("#coach-" + m.id);
+        act(async () => {
+          box.innerHTML = `<div class="ai-box"><div class="ai-box__head">${icon("bolt")} Coach is thinking…</div></div>`;
+          const r = await S.aiCoach((q.topics || [])[0], "I failed this question and it's in my mistake book. Walk me through how to think about it, then give me one similar question to practise.", m.id);
+          box.innerHTML = `<div class="ai-box"><div class="ai-box__head">${icon("bolt")} Coach <span class="xs faint" style="margin-left:auto">${escapeHtml(r.model || "")}</span></div>${mdToHtml(r.answer)}</div>`;
+        }, btn)();
+      }
+
+      /* ---------- Library ---------- */
+      function renderLibrary() {
+        const subjects = S.bookSubjects();
+        qs("#library").innerHTML = subjects.map(sub => {
+          const books = S.listBooks(sub);
+          return `<div>
+            <h3 class="squiggle squiggle--terra" style="font-size:var(--fs-lg);margin-bottom:var(--sp-4)">${escapeHtml(sub)}</h3>
+            <div class="grid grid-2">
+              ${books.map(b => `<div class="card card--flat book" style="border:var(--bw) solid var(--border-strong)">
+                <div class="book__spine"></div>
+                <div style="flex:1">
+                  <div class="row row--between" style="align-items:flex-start"><strong style="font-size:var(--fs-md)">${escapeHtml(b.title)}</strong>${icon("external")}</div>
+                  <p class="small muted" style="margin:4px 0">${escapeHtml(b.author || "")}</p>
+                  <span class="tag">${escapeHtml(b.licence)}</span>
+                  <div style="margin-top:var(--sp-3)"><a class="btn btn--sm btn--ghost" href="${escapeHtml(b.url)}" target="_blank" rel="noopener">Open</a></div>
+                </div>
+              </div>`).join("")}
+            </div>
+          </div>`;
+        }).join("") + `<div class="card card--note">
+            <div class="row row--between" style="flex-wrap:wrap;gap:var(--sp-3)">
+              <div><strong>Know a book that belongs here?</strong>
+              <p class="small muted" style="margin:4px 0 0">Only freely and legally available books live on this shelf &mdash; open licence or publisher-approved free. An admin opens the link and checks the licence before anything is added.</p></div>
+              <button class="btn btn--ghost" id="suggestBook">${icon("send")} Suggest a book</button>
+            </div>
+          </div>`;
+        on(qs("#suggestBook"), "click", suggestBook);
+      }
+
+      function suggestBook() {
+        const back = openModal(`
+          <div class="modal__head"><div class="modal__title">Suggest a book</div><button class="icon-btn" data-close aria-label="Close">${icon("x")}</button></div>
+          <div class="modal__body">
+            <p class="small muted">It goes to an admin, who checks the licence before it reaches the shelf. Scans of paid books get rejected.</p>
+            <div class="field"><label class="label" for="sgTitle">Title</label><input class="input" id="sgTitle"></div>
+            <div class="field"><label class="label" for="sgAuthor">Author</label><input class="input" id="sgAuthor"></div>
+            <div class="grid grid-2">
+              <div class="field"><label class="label" for="sgSubject">Subject</label><input class="input" id="sgSubject" list="sgSubjects" placeholder="e.g. Databases"><datalist id="sgSubjects">${S.bookSubjects().map(s => `<option value="${escapeHtml(s)}">`).join("")}</datalist></div>
+              <div class="field"><label class="label" for="sgLic">Licence</label><select class="select" id="sgLic"><option value="">Choose…</option>${["Public domain", "CC BY", "CC BY-SA", "CC BY-NC", "Author-hosted free", "OpenAccess", "Not sure"].map(l => `<option>${l}</option>`).join("")}</select></div>
+            </div>
+            <div class="field"><label class="label" for="sgUrl">Link to the legal copy</label><input class="input" id="sgUrl" type="url" placeholder="https://"></div>
+            <div class="field"><label class="label" for="sgWhy">Why it's worth reading</label><textarea class="textarea" id="sgWhy" rows="3"></textarea></div>
+            <div id="sgErrs"></div>
+          </div>
+          <div class="modal__foot"><button class="btn btn--ghost" data-close>Cancel</button><button class="btn btn--primary" id="sgGo">${icon("send")} Send to admin</button></div>`, { width: 600 });
+        on(qs("#sgGo", back), "click", act(async () => {
+          const v = id => qs(id, back).value.trim();
+          const errs = [];
+          if (v("#sgTitle").length < 2) errs.push("What's the book called?");
+          if (!v("#sgSubject")) errs.push("Add a subject so it lands on the right shelf.");
+          if (!/^https:\/\/.+\..+/.test(v("#sgUrl"))) errs.push("We need an https link to the legal copy.");
+          if (errs.length) { qs("#sgErrs", back).innerHTML = `<div class="warnbar">${icon("alert")}<div>${errs.map(escapeHtml).join("<br>")}</div></div>`; return; }
+          await S.submitBook({ title: v("#sgTitle"), author: v("#sgAuthor"), subject: v("#sgSubject"), licence: v("#sgLic") || "Not sure", url: v("#sgUrl"), note: v("#sgWhy") });
+          closeModal(back);
+          toast("Sent. An admin will check the licence before it goes up.", { type: "success" });
+        }, qs("#sgGo", back)));
+      }
+    })();
+  </script>
+</body>
+</html>

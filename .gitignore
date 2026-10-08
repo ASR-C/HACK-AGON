@@ -1,0 +1,12 @@
+node_modules/
+npm-debug.log*
+
+# secrets — never committed
+.env
+server/.env
+*.env.local
+
+# runtime artefacts
+server/data/snapshots/
+.DS_Store
+Thumbs.db

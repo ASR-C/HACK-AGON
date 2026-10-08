@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Host dashboard · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .cam-on { color: var(--forest); font-weight: 700; }
+    .cam-off { color: var(--stamp); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main" class="page">
+    <div class="wrap wrap--wide" id="root"></div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, on, icon, toast, escapeHtml, money, avatarHtml, statusBadge, emptyState, confirmDialog, openModal, act } = window.App, S = window.Store;
+      const root = qs("#root");
+      const requested = new URLSearchParams(location.search).get("room");
+      let me, roomId = requested, liveTimer = null;
+
+      window.App.page(async () => {
+        me = window.App.requireAuth(); if (!me) return;
+        window.App.mountShell(null);
+
+        let room = null;
+        if (roomId) { try { room = await S.fetchRoom(roomId); } catch (e) { room = null; } }
+        if (!room) { roomId = null; return renderPicker(); }
+        if (room.hostId !== me.id && !me.isAdmin) {
+          root.innerHTML = emptyState("This isn't your room.", "Only the host gets the dashboard.", '<a class="btn btn--primary" href="arena.html">Back to the Arena</a>');
+          return;
+        }
+        await render();
+      });
+
+      async function renderPicker() {
+        await S.refreshRooms().catch(() => {});
+        const mine = S.listRooms({ hostId: me.id });
+        root.innerHTML = `<div class="row row--between" style="margin-bottom:var(--sp-5)"><div><span class="eyebrow">your contests</span><h1 class="squiggle">Host dashboard</h1></div><a class="btn btn--primary" href="create-room.html">New room</a></div>` +
+          (mine.length ? `<div class="grid grid-auto">${mine.map(window.App.roomTile).join("")}</div>` : emptyState("You haven't hosted anything yet.", "Your rooms and tournaments show up here with live players, violations and results.", '<a class="btn btn--primary" href="create-room.html">Create your first room</a>'));
+      }
+
+      function camCell(p, proctored) {
+        if (!proctored) return '<span class="faint">n/a</span>';
+        const label = { ok: "on", pending: "pending", denied: "denied" }[p.camera] || "pending";
+        return label === "on" ? '<span class="cam-on">on</span>' : `<span class="cam-off">${label}</span>`;
+      }
+
+      async function render() {
+        const r = await S.fetchRoom(roomId);
+        const [board, viols, snaps] = await Promise.all([
+          S.getBoard(r.id).then(x => x.board).catch(() => S.scoreboard(r.id)),
+          r.tournamentMode ? S.listViolations(r.id).then(x => x.violations || []).catch(() => []) : Promise.resolve([]),
+          r.tournamentMode ? S.listSnapshots(r.id).catch(() => []) : Promise.resolve([])
+        ]);
+        const cash = r.prizePoolPaise || r.entryFeePaise
+          ? await S.moneySummary(r.id).catch(() => null)
+          : null;
+
+        root.innerHTML = `
+          <div class="row row--between" style="align-items:flex-end;flex-wrap:wrap;gap:var(--sp-3);margin-bottom:var(--sp-5)">
+            <div>
+              <div class="row row--tight" style="margin-bottom:6px">${statusBadge(r)} ${r.tournamentMode ? '<span class="badge badge--proctored">' + icon("camera") + ' proctored</span>' : ''} ${r.payoutBlocked ? '<span class="badge badge--live">payout blocked by dispute</span>' : ''}</div>
+              <h1 class="squiggle">${escapeHtml(r.name)}</h1>
+              <p class="lead">${r.players.length}/${r.size} players · ${r.durationMin} min · ${escapeHtml(r.format)}${r.inviteCode ? ' · invite ' + escapeHtml(r.inviteCode) : ''}</p>
+            </div>
+            <div class="row">
+              ${r.status === "open" || r.status === "draft" ? `<button class="btn btn--success" id="startBtn">${icon("play")} Start now</button>` : ""}
+              ${r.status === "live" ? `<button class="btn btn--danger" id="endBtn">${icon("flag")} End &amp; lock results</button>` : ""}
+              ${r.status === "ended" && r.type === "tournament" && r.prizePoolPaise ? `<button class="btn btn--accent" id="settleBtn">${icon("rupee")} Settle payouts</button>` : ""}
+              ${r.status === "ended" && cash && cash.escrowPaise ? `<button class="btn btn--ghost" id="refundBtn">${icon("refresh")} Refund entries</button>` : ""}
+              <a class="btn btn--ghost" href="host-dashboard.html">All my contests</a>
+            </div>
+          </div>
+
+          <div class="split split--70-30" style="align-items:start">
+            <div class="stack stack-5">
+              <div class="card card--sticker">
+                <div class="card__title" style="margin-bottom:var(--sp-3)">Live players</div>
+                <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Player</th><th>Camera</th><th>Violations</th><th>Score</th><th></th></tr></thead><tbody>
+                  ${r.players.map(p => {
+                    const row = board.find(b => b.userId === p.userId);
+                    const snapCount = snaps.filter(s => s.userId === p.userId).length;
+                    return `<tr>
+                      <td class="rank">${row ? row.rank : "—"}</td>
+                      <td><span class="row row--tight">${avatarHtml(p, "sm")} ${escapeHtml(p.name)}${p.eliminated ? ' <span class="badge badge--live">eliminated</span>' : ''}${p.locked ? ' <span class="badge badge--proctored">' + icon("lock") + ' locked</span>' : ''}</span></td>
+                      <td>${camCell(p, r.tournamentMode)}</td>
+                      <td class="mono">${p.violations || 0}${snapCount ? ` <span class="xs faint">(${snapCount} snaps)</span>` : ""}</td>
+                      <td class="mono">${row ? row.score : 0}</td>
+                      <td><div class="row row--tight">
+                        ${p.locked && !p.eliminated ? `<button class="btn btn--sm btn--ghost" data-review="${p.userId}">Review</button><button class="btn btn--sm btn--ghost" data-unlock="${p.userId}">Unlock</button>` : ""}
+                        ${r.status === "live" && !p.eliminated ? `<button class="btn btn--sm btn--danger" data-elim="${p.userId}">Eliminate</button>` : ""}
+                      </div></td>
+                    </tr>`;
+                  }).join("") || '<tr><td colspan="6" class="faint">No players yet.</td></tr>'}
+                </tbody></table></div>
+              </div>
+
+              <div class="card card--sticker">
+                <div class="card__title" style="margin-bottom:var(--sp-3)">Scoreboard</div>
+                <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Player</th><th>Solved</th><th>Score</th><th>Last correct</th></tr></thead><tbody>
+                  ${board.map(b => `<tr><td class="rank">${b.rank}</td><td>${escapeHtml(b.name)}</td><td>${(b.solved || []).length}/${r.questionIds.length}</td><td class="mono">${b.score}</td><td class="xs faint">${b.lastCorrectAt ? S.ago(b.lastCorrectAt) : "—"}</td></tr>`).join("") || '<tr><td colspan="5" class="faint">Empty board.</td></tr>'}
+                </tbody></table></div>
+              </div>
+            </div>
+
+            <aside class="stack stack-4">
+              <div class="card card--sticker">
+                <div class="card__title" style="margin-bottom:var(--sp-3)">Violation log</div>
+                <div class="stack stack-2" style="max-height:300px;overflow:auto">
+                  ${viols.length ? viols.slice().reverse().map(v => { const p = S.getPlayer(r.id, v.userId); return `<div class="listrow"><div class="listrow__main"><div class="listrow__title">${escapeHtml(p ? p.name : "?")}</div><div class="listrow__sub">${escapeHtml(v.type)} · ${S.ago(v.at)}</div></div>${icon("alert")}</div>`; }).join("") : `<p class="xs faint">${r.tournamentMode ? "No violations. Everyone is behaving." : "This room isn't proctored, so nothing is being logged."}</p>`}
+                </div>
+              </div>
+              <div class="card card--well">
+                <div class="card__title" style="font-size:var(--fs-md);margin-bottom:6px">Money</div>
+                <div class="stack stack-2 small">
+                  <div class="row row--between"><span class="faint">Prize pool</span><strong>${cash && cash.prizePoolPaise ? money(cash.prizePoolPaise) + (cash.funded ? " (funded)" : " (not funded)") : "—"}</strong></div>
+                  <div class="row row--between"><span class="faint">Entry fees in escrow</span><strong>${cash ? money(cash.escrowPaise) + " · " + cash.entries + " paid" : "—"}</strong></div>
+                  <div class="row row--between"><span class="faint">Platform fee (1%)</span><strong>${cash && cash.prizePoolPaise ? money(cash.platformFeePaise) : "—"}</strong></div>
+                  <div class="row row--between"><span class="faint">Winners get</span><strong>${cash && cash.prizePoolPaise ? money(cash.netPrizePaise) : "—"}</strong></div>
+                </div>
+                <p class="xs faint" style="margin-top:8px">Charges are recorded, not captured — no live payment gateway is attached to this build.</p>
+              </div>
+            </aside>
+          </div>`;
+
+        const sb = qs("#startBtn");
+        if (sb) on(sb, "click", act(async () => {
+          await S.startRoom(r.id);
+          toast("Started. Players get the countdown.", { type: "success" });
+          await render(); startLivePoll(r.status);
+        }, sb));
+
+        const eb = qs("#endBtn");
+        if (eb) on(eb, "click", act(async () => {
+          const ok = await confirmDialog({ title: "End and lock results?", body: "<p class='small muted'>Final ranks are fixed and stored in MySQL. Players can't submit after this.</p>", okText: "End match", danger: true });
+          if (!ok) return;
+          await S.finaliseRoom(r.id);
+          toast("Results locked.", { type: "success" });
+          await render(); startLivePoll("ended");
+        }, eb));
+
+        const stb = qs("#settleBtn");
+        if (stb) on(stb, "click", act(async () => {
+          if (r.payoutBlocked) { toast("A dispute is open. Payouts stay blocked until an admin resolves it.", { type: "error" }); return; }
+          const boardNow = board;
+          const net = r.prizePoolPaise - S.platformFee(r.prizePoolPaise);
+          const lines = Object.keys(r.split || { 1: 100 }).sort((a, b) => a - b).map(k => {
+            const w = boardNow.find(b => b.rank === Number(k));
+            const amt = Math.round(net * (r.split[k] || 0) / 100);
+            return `<div class="row row--between"><span>Rank ${k} · ${escapeHtml(w ? w.name : "no one")}</span><strong>${money(amt)}</strong></div>`;
+          }).join("");
+          const ok = await confirmDialog({ title: "Settle payouts", body: `<div class="stack stack-2 small">${lines}</div><p class="xs faint" style="margin-top:8px">Paid to verified UPI/bank via Razorpay payouts (recorded, not captured, in this build).</p>`, okText: "Pay winners" });
+          if (!ok) return;
+          const res = await S.settlePayouts(r.id);
+          toast(res.made && res.made.length ? "Payouts sent to " + res.made.length + " winner(s)." : "No winners to pay.", { type: "success" });
+          await render();
+        }, stb));
+
+        const rb = qs("#refundBtn");
+        if (rb) on(rb, "click", act(async () => {
+          const ok = await confirmDialog({ title: "Refund every entry fee?", body: "<p class='small muted'>Each escrowed entry goes back to the player in full. The platform keeps no fee on entries.</p>", okText: "Refund all", danger: true });
+          if (!ok) return;
+          const res = await S.refundAll(r.id, "Refunded by the host");
+          toast(res.refunded + " entry fee(s) refunded.", { type: "success" });
+          await render();
+        }, rb));
+
+        root.addEventListener("click", e => {
+          const elim = e.target.closest("[data-elim]");
+          const review = e.target.closest("[data-review]");
+          const unlock = e.target.closest("[data-unlock]");
+
+          if (unlock) {
+            const userId = unlock.dataset.unlock;
+            act(async () => {
+              await S.unlockPlayer(r.id, userId);
+              toast("Lock lifted. They can carry on.", { type: "success" });
+              await render();
+            }, unlock)();
+          }
+
+          if (elim) {
+            const userId = elim.dataset.elim; const p = S.getPlayer(r.id, userId);
+            const back = openModal(`
+              <div class="modal__head"><div class="modal__title">Eliminate ${escapeHtml(p.name)}?</div><button class="icon-btn" data-close aria-label="Close">${icon("x")}</button></div>
+              <div class="modal__body stack">
+                <p class="small muted">The reason is stored and shown to the player. They can't rejoin and their score leaves the ranking. For unfair means there's no refund and no prize.</p>
+                <div class="field"><label class="label" for="eReason">Reason</label><textarea class="textarea" id="eReason" rows="2" placeholder="e.g. second device visible in snapshots"></textarea></div>
+              </div>
+              <div class="modal__foot"><button class="btn btn--ghost" data-close>Cancel</button><button class="btn btn--danger" id="eOk">Eliminate</button></div>`, { width: 460 });
+            on(qs("#eOk", back), "click", act(async () => {
+              const reason = qs("#eReason", back).value.trim() || "No reason given";
+              await S.eliminatePlayer(r.id, userId, reason);
+              window.App.closeModal(back);
+              toast("Eliminated. They've been told why.", { type: "success" });
+              await render();
+            }, qs("#eOk", back)));
+          }
+
+          if (review) {
+            const userId = review.dataset.review; const p = S.getPlayer(r.id, userId);
+            const logs = viols.filter(v => v.userId === userId);
+            const mine = snaps.filter(s => s.userId === userId);
+            openModal(`
+              <div class="modal__head"><div class="modal__title">Review ${escapeHtml(p.name)}</div><button class="icon-btn" data-close aria-label="Close">${icon("x")}</button></div>
+              <div class="modal__body stack">
+                <div><span class="label xs">Violations</span><div class="violation-log" style="width:100%;text-align:left;font-family:var(--font-mono);font-size:var(--fs-xs);background:var(--surface-sunk);border:1.5px solid var(--border-strong);border-radius:8px;padding:8px;margin-top:6px;color:var(--ink)">${logs.map(v => new Date(v.at).toLocaleTimeString() + " · " + v.type).join("\n") || "none"}</div></div>
+                <div><span class="label xs">Snapshots (${mine.length})</span>
+                  ${mine.length
+                    ? `<div class="grid grid-2" style="margin-top:6px;gap:8px">${mine.slice(0, 12).map(s => `<figure style="margin:0"><img src="${S.snapshotUrl(r.id, s.id)}" alt="Proctor snapshot at ${new Date(s.at).toLocaleTimeString()}" style="width:100%;border-radius:8px;border:var(--bw) solid var(--border-strong)" /><figcaption class="xs faint" style="margin-top:4px">${new Date(s.at).toLocaleTimeString()}</figcaption></figure>`).join("")}</div>`
+                    : `<p class="xs faint" style="margin-top:4px">No frames captured — they ran without a camera, which itself is on the log above.</p>`}
+                </div>
+              </div>
+              <div class="modal__foot">
+                <button class="btn btn--ghost" id="keepLock">Keep the lock</button>
+                <button class="btn btn--danger" id="elimFromReview">Eliminate instead</button>
+              </div>`, { width: 620 });
+            on(qs("#keepLock"), "click", () => { window.App.closeModal(); toast("Lock kept for the rest of the match.", { type: "info" }); });
+            on(qs("#elimFromReview"), "click", act(async () => {
+              await S.eliminatePlayer(r.id, userId, "Unfair means confirmed on review");
+              window.App.closeModal();
+              toast("Eliminated after review.", { type: "success" });
+              await render();
+            }, qs("#elimFromReview")));
+          }
+        });
+
+        startLivePoll(r.status);
+      }
+
+      /* Keep the board moving while a match runs, but never fight an open modal. */
+      function startLivePoll(status) {
+        if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+        if (status !== "live") return;
+        liveTimer = setInterval(async () => {
+          if (document.querySelector(".modal-backdrop")) return;
+          try { await render(); } catch (e) { /* the next tick tries again */ }
+        }, 5000);
+      }
+    })();
+  </script>
+</body>
+</html>

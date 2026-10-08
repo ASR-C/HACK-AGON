@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Host a tournament · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main" class="page">
+    <div class="wrap wrap--wide">
+      <div class="row row--between" style="align-items:flex-end;margin-bottom:var(--sp-5);flex-wrap:wrap;gap:var(--sp-3)">
+        <div>
+          <span class="eyebrow">money on the table, held safely</span>
+          <h1 class="squiggle">Host a tournament</h1>
+          <p class="lead">Fund a prize pool, set entry fees and a fixed split. Registration opens only once the pool clears.</p>
+        </div>
+        <a class="btn btn--ghost" href="create-room.html">No money involved? Create a room</a>
+      </div>
+
+      <div class="card card--sticker hide" id="orgCard" style="margin-bottom:var(--sp-5);background:var(--surface-sunk)">
+        <div class="card__head"><div class="card__title">Request organisation status</div><span class="badge badge--proctored" data-ic-wrap="building"></span></div>
+        <p class="small muted" style="margin-bottom:var(--sp-4)">For colleges, clubs and companies running large paid events. An admin approves it; until then you can still host personal tournaments.</p>
+        <form id="orgForm" class="row" style="gap:var(--sp-3);flex-wrap:wrap">
+          <div class="field" style="flex:1;min-width:220px"><label class="label" for="orgName">Organisation name</label><input class="input" id="orgName" placeholder="e.g. NIT Surathk Coding Club" /></div>
+          <button class="btn btn--primary" type="submit" style="align-self:flex-end">Submit for approval</button>
+        </form>
+      </div>
+
+      <div id="createForm"></div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/create.js"></script>
+  <script>
+    (function () {
+      const { qs, on, toast, icon, act } = window.App, S = window.Store;
+      window.App.page(async () => {
+        const me = window.App.requireAuth(); if (!me) return;
+        window.App.mountShell(null);
+        const wantOrg = new URLSearchParams(location.search).get("org") === "1";
+        if (wantOrg && !me.org) {
+          qs("#orgCard").classList.remove("hide");
+          qs("[data-ic-wrap]").innerHTML = icon("building");
+          on(qs("#orgForm"), "submit", act(async e => {
+            const name = qs("#orgName").value.trim();
+            if (name.length < 3) { toast("Give the organisation a real name.", { type: "error" }); return; }
+            await S.updateUser({ org: { name, status: "pending", requestedAt: S.now() } });
+            toast("Request sent. An admin will review it.", { type: "success" });
+            qs("#orgCard").classList.add("hide");
+          }, qs("#orgForm button[type=submit]")));
+        }
+        window.CreateForm.init({ tournament: true });
+      });
+    })();
+  </script>
+</body>
+</html>

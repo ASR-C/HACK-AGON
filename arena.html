@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arena · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .arena-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-5); }
+    .filters { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-5); }
+    .filters__row { display: flex; gap: var(--sp-3); flex-wrap: wrap; align-items: center; }
+    .filters .input { max-width: 320px; }
+    .host-cta { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); background: var(--forest); color: #F3F7F5; border-color: var(--ink); flex-wrap: wrap; }
+    .host-cta h3 { color: #F3F7F5; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main" class="page">
+    <div class="wrap">
+      <div class="arena-head">
+        <div>
+          <span class="eyebrow">open rooms</span>
+          <h1 class="squiggle">The Arena</h1>
+          <p class="lead">Rooms anyone can join right now. Mostly free, mostly for the love of it. Pick one and fight.</p>
+        </div>
+        <a class="btn btn--primary" href="create-room.html">Host your own room</a>
+      </div>
+
+      <div class="filters">
+        <div class="filters__row">
+          <div style="position:relative;flex:1;max-width:340px">
+            <input class="input" id="q" placeholder="Search rooms by name" style="padding-left:2.4rem" />
+            <span class="ic" style="position:absolute;left:.8rem;top:50%;transform:translateY(-50%);color:var(--ink-faint);width:18px;height:18px" data-ic="search"></span>
+          </div>
+          <select class="select" id="lang" style="max-width:180px"><option value="">All languages</option></select>
+          <div class="chips" id="statusChips">
+            <button class="chip is-active" data-status="">All</button>
+            <button class="chip" data-status="open">Open</button>
+            <button class="chip" data-status="live">Live</button>
+          </div>
+        </div>
+        <div class="chips" id="topicChips"></div>
+      </div>
+
+      <div class="grid grid-auto" id="roomGrid"></div>
+
+      <div class="card card--sticker host-cta" style="margin-top:var(--sp-6)">
+        <div>
+          <h3>Nothing here fits?</h3>
+          <p class="small" style="opacity:.9;max-width:46ch">Spin up your own room in under three minutes. Sensible defaults, your rules, your questions.</p>
+        </div>
+        <a class="btn btn--accent" href="create-room.html">Create a room</a>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const { qs, on, roomTile, emptyState, ICONS, toast, page } = window.App, S = window.Store, SEED = S.SEED;
+      document.querySelectorAll("[data-ic]").forEach(e => { e.innerHTML = ICONS[e.dataset.ic] || ""; });
+
+      const state = { q: "", lang: "", status: "", topic: "" };
+
+      function render() {
+        let rooms = S.listRooms({ type: "room" });
+        if (state.status) rooms = rooms.filter(r => r.status === state.status);
+        else rooms = rooms.filter(r => r.status === "open" || r.status === "live");
+        if (state.topic) rooms = rooms.filter(r => (r.topics || []).includes(state.topic));
+        if (state.lang) rooms = rooms.filter(r => (r.langs || []).includes(state.lang));
+        if (state.q) rooms = rooms.filter(r => r.name.toLowerCase().includes(state.q.toLowerCase()));
+        const grid = qs("#roomGrid");
+        if (!rooms.length) {
+          grid.innerHTML = `<div style="grid-column:1/-1">${emptyState("No rooms yet. Start the first fight.", "Nothing matches those filters right now. Loosen them, or be the one who opens the floor.", '<a class="btn btn--primary" href="create-room.html">Create a room</a>')}</div>`;
+          return;
+        }
+        grid.innerHTML = rooms.map(roomTile).join("");
+      }
+
+      page(async () => {
+        const me = window.App.requireAuth(); if (!me) return;
+        window.App.mountShell("arena");
+
+        // language select
+        qs("#lang").innerHTML = '<option value="">All languages</option>' + SEED.languages.map(l => `<option value="${l.id}">${l.label}</option>`).join("");
+        // topic chips
+        qs("#topicChips").innerHTML = SEED.topics.map(t => `<button class="chip" data-topic="${t.id}">${t.label}</button>`).join("");
+
+        on(qs("#q"), "input", e => { state.q = e.target.value; render(); });
+        on(qs("#lang"), "change", e => { state.lang = e.target.value; render(); });
+        qs("#statusChips").addEventListener("click", e => {
+          const b = e.target.closest("[data-status]"); if (!b) return;
+          qs("#statusChips").querySelectorAll(".chip").forEach(c => c.classList.remove("is-active"));
+          b.classList.add("is-active"); state.status = b.dataset.status; render();
+        });
+        qs("#topicChips").addEventListener("click", e => {
+          const b = e.target.closest("[data-topic]"); if (!b) return;
+          const on2 = b.classList.contains("is-active");
+          qs("#topicChips").querySelectorAll(".chip").forEach(c => c.classList.remove("is-active"));
+          if (!on2) { b.classList.add("is-active"); state.topic = b.dataset.topic; } else state.topic = "";
+          render();
+        });
+
+        await S.refreshRooms().catch(() => {});
+        render();
+      });
+    })();
+  </script>
+</body>
+</html>

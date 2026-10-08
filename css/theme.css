@@ -1,0 +1,119 @@
+/* ============================================================
+   HackAgon — theme.css
+   THE single style-guide file. Every page imports this.
+   Change a value here and the whole site changes.
+   Direction: "Warm and local" — earthy, hand-made, human.
+   ============================================================ */
+
+/* --- Fonts (Google Fonts, personality over default) -------- */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;0,9..144,900;1,9..144,600&family=Karla:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Kalam:wght@300;400;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap');
+
+:root {
+  /* --- Colour · core palette (hex, as committed) ----------- */
+  --paper:        #F6EDE0;  /* warm off-white background       */
+  --paper-2:      #FBF6EC;  /* lighter card surface            */
+  --paper-3:      #EFE2CE;  /* deeper paper / wells            */
+  --ink:          #2A211B;  /* warm near-black body text       */
+  --ink-soft:     #5C4C3F;  /* muted brown text                */
+  --ink-faint:    #8A7665;  /* captions, placeholders          */
+  --terracotta:   #B4523A;  /* primary accent / CTAs           */
+  --terracotta-d: #93402C;  /* pressed / hover                 */
+  --turmeric:     #DD9A2B;  /* secondary accent / highlights   */
+  --turmeric-d:   #B87C17;
+  --forest:       #2F5D50;  /* success / secondary buttons     */
+  --forest-d:     #24483E;
+  --clay:         #E3CDB0;  /* soft fills, borders             */
+  --stamp:        #9E3324;  /* errors, lock screen, delete     */
+  --stamp-d:      #7C271B;
+  --sky:          #4C7C8C;  /* info / links on light           */
+
+  /* --- Semantic tokens ------------------------------------- */
+  --bg:            var(--paper);
+  --surface:       var(--paper-2);
+  --surface-sunk:  var(--paper-3);
+  --text:          var(--ink);
+  --text-muted:    var(--ink-soft);
+  --text-faint:    var(--ink-faint);
+  --primary:       var(--terracotta);
+  --primary-hover: var(--terracotta-d);
+  --accent:        var(--turmeric);
+  --success:       var(--forest);
+  --danger:        var(--stamp);
+  --info:          var(--sky);
+  --border:        #D9C4A8;      /* hand-drawn edge, warm       */
+  --border-strong: #C0A684;
+  --on-primary:    #FBF3E7;      /* text on terracotta/forest   */
+  --on-accent:     #2A211B;      /* dark ink on turmeric        */
+
+  /* --- Fonts ------------------------------------------------ */
+  --font-display: 'Fraunces', 'Georgia', serif;
+  --font-body:    'Karla', 'Segoe UI', sans-serif;
+  --font-hand:    'Kalam', 'Comic Sans MS', cursive;
+  --font-mono:    'JetBrains Mono', 'Consolas', monospace;
+
+  /* --- Type scale ------------------------------------------- */
+  --fs-xs:   0.78rem;
+  --fs-sm:   0.9rem;
+  --fs-base: 1rem;
+  --fs-md:   1.12rem;
+  --fs-lg:   1.4rem;
+  --fs-xl:   1.9rem;
+  --fs-2xl:  2.6rem;
+  --fs-3xl:  clamp(2.4rem, 6vw, 4.2rem);
+
+  /* --- Spacing (8pt-ish, warm rhythm) ----------------------- */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+  --sp-8: 4.5rem;
+  --sp-9: 6rem;
+
+  /* --- Radii (soft, organic — not glassy pills) ------------- */
+  --r-sm: 6px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+  --r-tag: 999px;
+
+  /* --- Borders ---------------------------------------------- */
+  --bw: 2px;         /* standard hand-drawn edge   */
+  --bw-thick: 3px;   /* emphasis cards / buttons   */
+
+  /* --- Shadows (soft warm lift, plus a hard "sticker" one) -- */
+  --sh-soft:  0 6px 18px rgba(74, 51, 32, 0.10);
+  --sh-lift:  0 12px 30px rgba(74, 51, 32, 0.16);
+  --sh-hard:  4px 4px 0 rgba(42, 33, 27, 0.9);   /* sticker offset */
+  --sh-hard-lg: 7px 7px 0 rgba(42, 33, 27, 0.9);
+
+  /* --- Motion ------------------------------------------------ */
+  --ease: cubic-bezier(.22,.61,.36,1);
+  --dur-fast: 140ms;
+  --dur: 240ms;
+  --dur-slow: 520ms;
+
+  /* --- Layout ------------------------------------------------ */
+  --maxw: 1180px;
+  --nav-h: 68px;
+  --topbar-h: 60px;
+
+  /* --- Paper texture (subtle fibre, data-URI SVG) ----------- */
+  --paper-texture:
+    radial-gradient(circle at 18% 22%, rgba(190,160,120,.05) 0 2px, transparent 2px),
+    radial-gradient(circle at 72% 64%, rgba(190,160,120,.045) 0 2px, transparent 2px),
+    radial-gradient(circle at 44% 88%, rgba(190,160,120,.04) 0 2px, transparent 2px);
+}
+
+/* --- Accessibility: honour reduced-motion ------------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur: 0ms; --dur-slow: 0ms; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin · HackAgon</title>
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .qrow td { vertical-align: middle; }
+    .qrow.is-retired { opacity: .6; }
+    .src { font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+    .src--seed { color: var(--forest); }
+    .src--custom { color: var(--terracotta); }
+    .rep { display: grid; gap: var(--sp-3); }
+    .rep__row { display: grid; grid-template-columns: 1fr 1fr auto; gap: var(--sp-2); align-items: end; }
+    @media (max-width: 720px) { .rep__row { grid-template-columns: 1fr; } }
+    .gate { max-width: 620px; margin: var(--sp-8) auto; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px var(--sp-3); }
+    .kv dt { color: var(--ink-soft); font-size: .82rem; }
+    .kv dd { font-weight: 700; }
+    .amt-pos { color: var(--forest); }
+    .amt-neg { color: var(--stamp); }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main id="main" class="page">
+    <div class="wrap wrap--wide" id="root"></div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      const {
+        qs, qsa, on, icon, toast, escapeHtml, money, avatarHtml, statusBadge, diffPill,
+        emptyState, confirmDialog, openModal, closeModal, act
+      } = window.App, S = window.Store, SEED = S.SEED;
+
+      window.App.page(async () => {
+        const me = window.App.requireAuth(); if (!me) return;
+        window.App.mountShell(null);
+        const root = qs("#root");
+
+        // Hard guard: non-admins are bounced away immediately, not just shown a message.
+        if (!me.isAdmin) {
+          location.replace("arena.html");
+          return;
+        }
+
+        const TABS = [
+          { id: "q", label: "Question bank", icon: "code" },
+          { id: "b", label: "Library licences", icon: "book" },
+          { id: "u", label: "Accounts", icon: "users" },
+          { id: "d", label: "Disputes", icon: "alert" },
+          { id: "m", label: "Money", icon: "rupee" }
+        ];
+        let active = new URLSearchParams(location.search).get("tab") || "q";
+        let qFilter = { q: "", topic: "", difficulty: "", src: "" };
+        let uSearch = "";
+        let totals = { escrowHeld: 0, entriesPaid: 0, prizesPaid: 0, refunds: 0, fees: 0 };
+        let openDisputes = [], resolvedDisputes = [], disputeRooms = {};
+
+        try { await loadAll(); }
+        catch (err) {
+          // A 403 here means the role was taken away in another tab or on the server.
+          if (err && err.status === 403) { location.replace("arena.html"); return; }
+          throw err;
+        }
+        boot();
+
+        /* ---------------- data loading ----------------
+           Every read is a request; the store keeps the cache that the
+           render functions below draw from. */
+        async function loadDisputes() {
+          const r = await S.listDisputes();
+          openDisputes = (r.disputes || []).filter(d => d.status === "open");
+          resolvedDisputes = (r.disputes || []).filter(d => d.status !== "open");
+          disputeRooms = r.rooms || {};
+        }
+        async function loadMoney() {
+          const [t] = await Promise.all([S.moneyTotals(), S.listLedger(), S.listPayments(), S.listPayouts(), S.listUsers("")]);
+          totals = t || totals;
+        }
+        async function loadAll() {
+          await Promise.all([
+            S.fetchAdminQuestions(), S.refreshRooms(), S.listUsers(""),
+            S.listPendingBooks(), S.refreshBooks(), loadDisputes(), loadMoney()
+          ]);
+        }
+        async function loadFor(tab) {
+          if (tab === "q") await Promise.all([S.fetchAdminQuestions(), S.refreshRooms()]);
+          else if (tab === "b") await Promise.all([S.listPendingBooks(), S.refreshBooks()]);
+          else if (tab === "u") await S.listUsers(uSearch);
+          else if (tab === "d") await Promise.all([loadDisputes(), S.refreshRooms()]);
+          else await loadMoney();
+        }
+
+        /* ---------------- gate ---------------- */
+        function renderGate(msg) {
+          root.innerHTML = `
+            <div class="card card--sticker gate">
+              <div class="card__title">${icon("shield")} Admin only</div>
+              <p class="lead">This page manages the question bank, the library licences, accounts, disputes and the money ledger. Your account doesn&rsquo;t have that role.</p>
+              ${msg ? `<p class="small" style="color:var(--stamp)">${escapeHtml(msg)}</p>` : ""}
+              <div class="card card--well" style="margin-top:var(--sp-4)">
+                <div class="card__title" style="font-size:1rem">How the role is granted</div>
+                <p class="small">Roles live in MySQL and are checked server-side on every request (PRD &sect;3) &mdash; nothing on this page can grant one. On the machine running the server:</p>
+                <ul class="small" style="margin:8px 0 0 18px">
+                  <li>add the email to <code class="mono">ADMIN_EMAILS</code> in <code class="mono">server/.env</code> before that person signs up, or</li>
+                  <li>run <code class="mono">node server/make-admin.js you@example.com</code> and sign in again.</li>
+                </ul>
+              </div>
+              <div class="row" style="margin-top:var(--sp-4)">
+                <a class="btn btn--ghost" href="arena.html">Back to the Arena</a>
+              </div>
+            </div>`;
+        }
+
+        /* ---------------- shell ---------------- */
+        function boot() {
+          const srv = S.state.server || {};
+          root.innerHTML = `
+            <div class="row row--between" style="align-items:flex-end;flex-wrap:wrap;gap:var(--sp-3);margin-bottom:var(--sp-4)">
+              <div>
+                <span class="eyebrow">back office</span>
+                <h1 class="squiggle">Admin</h1>
+                <p class="lead">Signed in as ${escapeHtml(me.name)} &middot; @${escapeHtml(me.username)}</p>
+              </div>
+              <div class="row row--tight">
+                <span class="badge badge--proctored">${icon("shield")} admin role</span>
+                <span class="badge badge--${srv.mail && srv.mail.enabled ? "open" : "ended"}">${srv.mail && srv.mail.enabled ? "email OTP live" : "email not configured"}</span>
+                <span class="badge badge--${srv.ai && srv.ai.enabled ? "open" : "draft"}">${srv.ai && srv.ai.enabled ? "AI coach on (" + escapeHtml(srv.ai.model || "groq") + ")" : "AI coach off"}</span>
+              </div>
+            </div>
+            <div class="tabs" role="tablist" id="tabs"></div>
+            <div id="pane" class="section section--tight"></div>`;
+          renderTabs(); render();
+        }
+
+        function renderTabs() {
+          const pendingBooks = S.state.pendingBooks.filter(b => b.status === "pending").length;
+          qs("#tabs").innerHTML = TABS.map(t => {
+            const n = t.id === "d" ? openDisputes.length : t.id === "b" ? pendingBooks : 0;
+            return `<button class="tab ${active === t.id ? "is-active" : ""}" data-tab="${t.id}" role="tab" aria-selected="${active === t.id}">${icon(t.icon)} ${t.label}${n ? ` <span class="badge badge--live">${n}</span>` : ""}</button>`;
+          }).join("");
+          qsa("[data-tab]").forEach(b => on(b, "click", act(async () => {
+            active = b.dataset.tab;
+            history.replaceState(null, "", "?tab=" + active);
+            await loadFor(active);
+            renderTabs(); render();
+          }, b)));
+        }
+
+        function render() {
+          const pane = qs("#pane");
+          if (active === "q") renderQuestions(pane);
+          else if (active === "b") renderBooks(pane);
+          else if (active === "u") renderUsers(pane);
+          else if (active === "d") renderDisputes(pane);
+          else renderMoney(pane);
+        }
+
+        /* =========================================================
+           QUESTION BANK
+           ========================================================= */
+        function renderQuestions(pane) {
+          pane.innerHTML = `
+            <div class="row row--between" style="align-items:flex-end;flex-wrap:wrap;gap:var(--sp-3);margin-bottom:var(--sp-4)">
+              <div>
+                <h2 class="h-display" style="font-size:var(--fs-3)">Question bank</h2>
+                <p class="small muted">Seeded questions shipped with the database. Anything you add or edit here is written to MySQL and shows up in every creation form and duel picker.</p>
+              </div>
+              <button class="btn btn--primary" id="newQ">${icon("plus")} New question</button>
+            </div>
+            <div class="card card--well" style="margin-bottom:var(--sp-4)">
+              <div class="grid grid-4">
+                <div class="field"><label class="label" for="fSearch">Search</label><input class="input" id="fSearch" type="search" placeholder="title or topic" value="${escapeHtml(qFilter.q)}"></div>
+                <div class="field"><label class="label" for="fTopic">Topic</label><select class="select" id="fTopic"><option value="">All topics</option>${SEED.topics.map(t => `<option value="${escapeHtml(t.id)}" ${qFilter.topic === t.id ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("")}</select></div>
+                <div class="field"><label class="label" for="fDiff">Difficulty</label><select class="select" id="fDiff"><option value="">Any</option>${["easy", "medium", "hard"].map(d => `<option value="${d}" ${qFilter.difficulty === d ? "selected" : ""}>${d[0].toUpperCase() + d.slice(1)}</option>`).join("")}</select></div>
+                <div class="field"><label class="label" for="fSrc">Source</label><select class="select" id="fSrc"><option value="">All</option><option value="seed" ${qFilter.src === "seed" ? "selected" : ""}>Seeded</option><option value="custom" ${qFilter.src === "custom" ? "selected" : ""}>Added here</option></select></div>
+              </div>
+            </div>
+            <div id="qList"></div>`;
+
+          on(qs("#newQ"), "click", () => editor(null));
+          on(qs("#fSearch"), "input", e => { qFilter.q = e.target.value; drawList(); });
+          on(qs("#fTopic"), "change", e => { qFilter.topic = e.target.value; drawList(); });
+          on(qs("#fDiff"), "change", e => { qFilter.difficulty = e.target.value; drawList(); });
+          on(qs("#fSrc"), "change", e => { qFilter.src = e.target.value; drawList(); });
+          drawList();
+        }
+
+        function drawList() {
+          const box = qs("#qList"); if (!box) return;
+          const needle = qFilter.q.trim().toLowerCase();
+          // state.questions holds the admin view: retired ones included, hidden cases attached.
+          const all = S.state.questions.filter(q => {
+            if (qFilter.topic && !(q.topics || []).includes(qFilter.topic)) return false;
+            if (qFilter.difficulty && q.difficulty !== qFilter.difficulty) return false;
+            if (qFilter.src === "seed" && q.custom) return false;
+            if (qFilter.src === "custom" && !q.custom) return false;
+            if (needle) {
+              const hay = (q.title + " " + (q.topics || []).join(" ")).toLowerCase();
+              if (!hay.includes(needle)) return false;
+            }
+            return true;
+          });
+
+          box.innerHTML = all.length ? `
+            <div class="table-wrap"><table class="table">
+              <thead><tr><th>Question</th><th>Topics</th><th>Level</th><th>Points</th><th>Cases</th><th>Source</th><th></th></tr></thead>
+              <tbody>${all.map(q => `
+                <tr class="qrow ${q.retired ? "is-retired" : ""}">
+                  <td><strong>${escapeHtml(q.title)}</strong>${q.retired ? ' <span class="badge badge--draft">retired</span>' : ""}<div class="xs faint mono">${escapeHtml(q.id)}</div></td>
+                  <td>${(q.topics || []).map(t => `<span class="chip">${escapeHtml(t)}</span>`).join(" ")}</td>
+                  <td>${diffPill(q.difficulty)}</td>
+                  <td class="mono">${q.points}</td>
+                  <td class="mono">${(q.cases || []).length}</td>
+                  <td><span class="src src--${q.custom ? "custom" : "seed"}">${q.custom ? "added" : "seed"}</span></td>
+                  <td class="nowrap">
+                    <button class="btn btn--sm btn--ghost" data-edit="${escapeHtml(q.id)}" aria-label="Edit ${escapeHtml(q.title)}">${icon("edit")}</button>
+                    ${q.retired
+                      ? `<button class="btn btn--sm btn--quiet" data-restore="${escapeHtml(q.id)}">Restore</button>`
+                      : `<button class="btn btn--sm btn--quiet" data-retire="${escapeHtml(q.id)}">Retire</button>`}
+                    ${q.custom ? `<button class="btn btn--sm btn--quiet" data-del="${escapeHtml(q.id)}" aria-label="Delete ${escapeHtml(q.title)}">${icon("trash")}</button>` : ""}
+                  </td></tr>`).join("")}</tbody></table></div>
+            <p class="xs faint" style="margin-top:var(--sp-3)">Retiring hides a question from new rooms and duels. Rooms already running keep their questions so nobody loses content mid-match.</p>`
+            : emptyState("Nothing matches those filters.", "Clear a filter, or add the question you were expecting to find.", '<button class="btn btn--primary" id="emptyNew">New question</button>');
+
+          const en = qs("#emptyNew"); if (en) on(en, "click", () => editor(null));
+          qsa("[data-edit]").forEach(b => on(b, "click", () => editor(S.getQuestion(b.dataset.edit))));
+
+          qsa("[data-retire]").forEach(b => on(b, "click", act(async () => {
+            const q = S.getQuestion(b.dataset.retire);
+            const used = S.listRooms({}).filter(r => (r.questionIds || []).includes(q.id) && r.status !== "ended").length;
+            const ok = await confirmDialog({
+              title: "Retire \"" + q.title + "\"?",
+              body: `<p class="small">${used ? `<strong>${used} unfinished room${used === 1 ? "" : "s"}</strong> still use this question. They keep it &mdash; retiring only stops it being offered to new rooms.` : "No unfinished rooms use this question."}</p>`,
+              okText: "Retire it", danger: true
+            });
+            if (!ok) return;
+            await S.retireQuestion(q.id);
+            toast("\"" + q.title + "\" retired.", { type: "success" });
+            drawList();
+          }, b)));
+
+          qsa("[data-restore]").forEach(b => on(b, "click", act(async () => {
+            const q = S.getQuestion(b.dataset.restore);
+            await S.restoreQuestion(q.id);
+            toast("\"" + q.title + "\" is back in the bank.", { type: "success" });
+            drawList();
+          }, b)));
+
+          qsa("[data-del]").forEach(b => on(b, "click", act(async () => {
+            const q = S.getQuestion(b.dataset.del);
+            const ok = await confirmDialog({ title: "Delete \"" + q.title + "\"?", body: "<p class=\"small\">This removes it from the bank for good. The server refuses if any room still references it.</p>", okText: "Delete", danger: true });
+            if (!ok) return;
+            await S.deleteQuestion(q.id);
+            toast("\"" + q.title + "\" deleted.", { type: "success" });
+            drawList();
+          }, b)));
+        }
+
+        /* ---------------- question editor ---------------- */
+        function plainToStatement(text) {
+          return escapeHtml(text || "").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\n/g, "<br>");
+        }
+        function statementToPlain(html) {
+          return String(html || "").replace(/<code>/g, "`").replace(/<\/code>/g, "`").replace(/<br\s*\/?>/g, "\n");
+        }
+
+        function editor(q) {
+          const d = q ? S.clone(q) : {
+            title: "", statement: "", topics: [], languages: SEED.ALL_LANGS.slice(), difficulty: "easy",
+            points: 100, timeLimitMin: 15, memoryLimitMB: 256, samples: [{ input: "", output: "", why: "" }],
+            sig: { js: "function solve()", py: "def solve():", java: "public int solve()", cpp: "int solve()", c: "int solve()" },
+            hint: "", cases: [{ argsText: "[]", expectedText: "" }], unordered: false, approach: ""
+          };
+          if (q) {
+            d.statementPlain = statementToPlain(q.statement);
+            d.samples = (q.samples || []).slice();
+            d.cases = (q.cases || []).map(c => ({ argsText: JSON.stringify(c.args), expectedText: JSON.stringify(c.expected) }));
+          }
+          d.sig = d.sig || {};
+
+          const back = openModal(`
+            <div class="modal__head"><div class="modal__title">${q ? "Edit" : "New"} question</div><button class="icon-btn" data-close aria-label="Close">${icon("x")}</button></div>
+            <div class="modal__body">
+              <div class="field"><label class="label" for="qTitle">Title <span class="req">*</span></label><input class="input" id="qTitle" value="${escapeHtml(d.title)}" placeholder="e.g. Pair With The Given Sum"></div>
+              <div class="field"><label class="label" for="qStmt">Statement <span class="req">*</span></label>
+                <textarea class="textarea" id="qStmt" rows="5" placeholder="Plain text. Wrap identifiers in backticks and they render as code.">${escapeHtml(d.statementPlain || "")}</textarea>
+                <span class="hint">Say exactly what to return &mdash; order, ties, empty input. Players only see this text and the samples.</span></div>
+              <div class="grid grid-3">
+                <div class="field"><label class="label" for="qDiff">Difficulty</label><select class="select" id="qDiff">${["easy", "medium", "hard"].map(x => `<option value="${x}" ${d.difficulty === x ? "selected" : ""}>${x[0].toUpperCase() + x.slice(1)}</option>`).join("")}</select></div>
+                <div class="field"><label class="label" for="qPts">Points <span class="req">*</span></label><input class="input" id="qPts" type="number" min="10" step="10" value="${d.points}"></div>
+                <div class="field"><label class="label" for="qTime">Time limit (min)</label><input class="input" id="qTime" type="number" min="1" value="${d.timeLimitMin || 15}"></div>
+              </div>
+              <div class="field"><span class="label">Topics <span class="req">*</span></span>
+                <div class="chips" id="qTopics">${SEED.topics.map(t => `<label class="chip"><input type="checkbox" value="${escapeHtml(t.id)}" ${(d.topics || []).includes(t.id) ? "checked" : ""}> ${escapeHtml(t.label)}</label>`).join("")}</div></div>
+              <div class="field"><span class="label">Languages <span class="req">*</span></span>
+                <div class="chips" id="qLangs">${SEED.ALL_LANGS.map(l => `<label class="chip"><input type="checkbox" value="${escapeHtml(l)}" ${(d.languages || []).includes(l) ? "checked" : ""}> ${escapeHtml(l)}</label>`).join("")}</div></div>
+
+              <div class="divider"></div>
+              <div class="card__title" style="margin-bottom:var(--sp-2)">Visible samples</div>
+              <div class="rep" id="qSamples"></div>
+              <button class="btn btn--sm btn--quiet" id="addSample" style="margin-top:var(--sp-2)">${icon("plus")} Add sample</button>
+
+              <div class="divider"></div>
+              <div class="card__title" style="margin-bottom:var(--sp-2)">Hidden test cases <span class="req">*</span></div>
+              <p class="xs faint">Args is the JSON array passed to <code>solve()</code>; expected is the JSON it must return. These stay on the server &mdash; the browser only ever sees how many there are.</p>
+              <div class="rep" id="qCases"></div>
+              <label class="check" style="margin-top:var(--sp-2)"><input type="checkbox" id="qUnordered" ${d.unordered ? "checked" : ""}><span class="check__box">${icon("check")}</span><span class="check__text">Order doesn't matter when comparing arrays</span></label>
+              <button class="btn btn--sm btn--quiet" id="addCase" style="margin-top:var(--sp-2)">${icon("plus")} Add case</button>
+
+              <div class="divider"></div>
+              <div class="card__title" style="margin-bottom:var(--sp-2)">Signature &amp; starters</div>
+              <div class="grid grid-2">
+                <div class="field"><label class="label" for="sigJs">JavaScript</label><input class="input input--code" id="sigJs" value="${escapeHtml(d.sig.js || "")}"></div>
+                <div class="field"><label class="label" for="sigPy">Python</label><input class="input input--code" id="sigPy" value="${escapeHtml(d.sig.py || "")}"></div>
+                <div class="field"><label class="label" for="sigJava">Java</label><input class="input input--code" id="sigJava" value="${escapeHtml(d.sig.java || "")}"></div>
+                <div class="field"><label class="label" for="sigCpp">C++</label><input class="input input--code" id="sigCpp" value="${escapeHtml(d.sig.cpp || "")}"></div>
+                <div class="field"><label class="label" for="sigC">C</label><input class="input input--code" id="sigC" value="${escapeHtml(d.sig.c || "")}"></div>
+                <div class="field"><label class="label" for="qHint">One-line hint</label><input class="input" id="qHint" value="${escapeHtml(d.hint || "")}"></div>
+              </div>
+              <div class="field"><label class="label" for="qApproach">Approach shown in Learning after a miss</label><textarea class="textarea" id="qApproach" rows="3">${escapeHtml(d.approach || "")}</textarea></div>
+              <div id="qErrs"></div>
+            </div>
+            <div class="modal__foot">
+              <button class="btn btn--ghost" data-close>Cancel</button>
+              <button class="btn btn--primary" id="saveQ">${icon("check")} ${q ? "Save changes" : "Add to bank"}</button>
+            </div>`, { width: 860 });
+
+          function drawSamples() {
+            qs("#qSamples", back).innerHTML = d.samples.map((s, i) => `
+              <div class="rep__row">
+                <div class="field" style="margin:0"><label class="label xs" for="sIn${i}">Input</label><input class="input input--code" id="sIn${i}" data-s="input" data-i="${i}" value="${escapeHtml(s.input || "")}"></div>
+                <div class="field" style="margin:0"><label class="label xs" for="sOut${i}">Output</label><input class="input input--code" id="sOut${i}" data-s="output" data-i="${i}" value="${escapeHtml(s.output || "")}"></div>
+                <button class="btn btn--sm btn--quiet" data-rms="${i}" aria-label="Remove sample">${icon("trash")}</button>
+                <div class="field" style="margin:0;grid-column:1/-1"><label class="label xs" for="sWhy${i}">Why</label><input class="input" id="sWhy${i}" data-s="why" data-i="${i}" value="${escapeHtml(s.why || "")}"></div>
+              </div>`).join("");
+            qsa("[data-s]", back).forEach(inp => on(inp, "input", e => { d.samples[+e.target.dataset.i][e.target.dataset.s] = e.target.value; }));
+            qsa("[data-rms]", back).forEach(b => on(b, "click", () => { d.samples.splice(+b.dataset.rms, 1); drawSamples(); }));
+          }
+          function drawCases() {
+            qs("#qCases", back).innerHTML = d.cases.map((c, i) => `
+              <div class="rep__row">
+                <div class="field" style="margin:0"><label class="label xs" for="cArgs${i}">Args (JSON array)</label><input class="input input--code" id="cArgs${i}" data-c="argsText" data-i="${i}" value="${escapeHtml(c.argsText)}"></div>
+                <div class="field" style="margin:0"><label class="label xs" for="cExp${i}">Expected (JSON)</label><input class="input input--code" id="cExp${i}" data-c="expectedText" data-i="${i}" value="${escapeHtml(c.expectedText)}"></div>
+                <button class="btn btn--sm btn--quiet" data-rmc="${i}" aria-label="Remove case">${icon("trash")}</button>
+              </div>`).join("");
+            qsa("[data-c]", back).forEach(inp => on(inp, "input", e => { d.cases[+e.target.dataset.i][e.target.dataset.c] = e.target.value; }));
+            qsa("[data-rmc]", back).forEach(b => on(b, "click", () => { d.cases.splice(+b.dataset.rmc, 1); drawCases(); }));
+          }
+          drawSamples(); drawCases();
+          on(qs("#addSample", back), "click", () => { d.samples.push({ input: "", output: "", why: "" }); drawSamples(); });
+          on(qs("#addCase", back), "click", () => { d.cases.push({ argsText: "[]", expectedText: "" }); drawCases(); });
+
+          on(qs("#saveQ", back), "click", act(async () => {
+            const val = id => qs(id, back).value.trim();
+            const checked = sel => qsa(sel + " input:checked", back).map(i => i.value);
+            const sig = { js: val("#sigJs"), py: val("#sigPy"), java: val("#sigJava"), cpp: val("#sigCpp"), c: val("#sigC") };
+            const hint = val("#qHint") || "Implement solve() as described.";
+
+            // JSON first: a bad bracket shouldn't wipe the rest of the form
+            const parsed = [];
+            for (let i = 0; i < d.cases.length; i++) {
+              let args, expected;
+              try { args = JSON.parse(d.cases[i].argsText); } catch (e) { return showErrs({ ["case" + i]: "Hidden case " + (i + 1) + ": args isn't valid JSON. It must be an array like [[2,7,11,15], 9]." }); }
+              try { expected = JSON.parse(d.cases[i].expectedText); } catch (e) { return showErrs({ ["case" + i]: "Hidden case " + (i + 1) + ": expected isn't valid JSON (numbers, strings, arrays, objects)." }); }
+              if (!Array.isArray(args)) return showErrs({ ["case" + i]: "Hidden case " + (i + 1) + ": args must be an array — the values go to solve() in order." });
+              parsed.push({ args, expected });
+            }
+
+            const payload = {
+              id: q ? q.id : null,
+              title: val("#qTitle"),
+              statement: plainToStatement(val("#qStmt")),
+              difficulty: val("#qDiff"),
+              points: Number(val("#qPts")) || 0,
+              timeLimitMin: Number(val("#qTime")) || 15,
+              memoryLimitMB: q ? q.memoryLimitMB : 256,
+              topics: checked("#qTopics label"),
+              languages: checked("#qLangs label"),
+              samples: d.samples.filter(s => s.input && s.output),
+              cases: parsed,
+              unordered: qs("#qUnordered", back).checked,
+              sig, hint, approach: val("#qApproach"),
+              starters: {
+                javascript: `// ${hint}\n${sig.js} {\n  \n}`,
+                python: `# ${hint}\n${sig.py}\n    pass`,
+                java: `// ${hint}\nclass Solution {\n    ${sig.java} {\n        \n    }\n}`,
+                cpp: `// ${hint}\n${sig.cpp} {\n    \n}`,
+                c: `/* ${hint} */\n${sig.c} {\n    \n}`
+              }
+            };
+
+            let saved;
+            try { saved = await S.saveQuestion(payload); }
+            catch (err) {
+              if (err && err.errs) return showErrs(err.errs);
+              throw err;
+            }
+            closeModal(back);
+            toast(saved.custom && !q ? "\"" + saved.title + "\" added to the bank." : "\"" + saved.title + "\" saved.", { type: "success" });
+            renderTabs(); drawList();
+          }, qs("#saveQ", back)));
+
+          function showErrs(errs) {
+            qs("#qErrs", back).innerHTML = `<div class="warnbar" style="margin-top:var(--sp-3)">${icon("alert")}<div><strong>Fix these before saving</strong><ul class="small" style="margin:6px 0 0 18px">${Object.values(errs).map(e => `<li>${escapeHtml(e)}</li>`).join("")}</ul></div></div>`;
+            qs("#qErrs", back).scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
+
+        /* =========================================================
+           LIBRARY LICENCES
+           ========================================================= */
+        function renderBooks(pane) {
+          const queue = S.state.pendingBooks;
+          const pending = queue.filter(b => b.status === "pending");
+          const decided = queue.filter(b => b.status !== "pending");
+          const shelf = S.listBooks();
+          pane.innerHTML = `
+            <div class="row row--between" style="align-items:flex-end;flex-wrap:wrap;gap:var(--sp-3);margin-bottom:var(--sp-4)">
+              <div>
+                <h2 class="h-display" style="font-size:var(--fs-3)">Library licences</h2>
+                <p class="small muted">Nothing goes on the shelf until someone has checked that it is genuinely free or openly licensed (PRD &sect;6). Pirated PDFs get rejected here, not quietly deleted.</p>
+              </div>
+              <button class="btn btn--primary" id="addBook">${icon("plus")} Add a book to the queue</button>
+            </div>
+            <div class="card card--sticker" style="margin-bottom:var(--sp-4)">
+              <div class="card__title">${icon("alert")} Waiting on a licence check <span class="badge badge--live">${pending.length}</span></div>
+              <div class="stack stack-3" id="pendingBooks" style="margin-top:var(--sp-3)"></div>
+            </div>
+            <div class="card">
+              <div class="card__title">On the shelf (${shelf.length})</div>
+              <div class="table-wrap" style="margin-top:var(--sp-2)"><table class="table">
+                <thead><tr><th>Book</th><th>Subject</th><th>Licence</th><th>Added</th></tr></thead>
+                <tbody>${shelf.map(b => `<tr>
+                  <td><strong>${escapeHtml(b.title)}</strong><div class="xs faint">${escapeHtml(b.author || "")}</div></td>
+                  <td><span class="chip">${escapeHtml(b.subject)}</span></td>
+                  <td><span class="badge badge--free">${escapeHtml(b.licence)}</span></td>
+                  <td class="xs">${b.createdAt ? escapeHtml(S.fmtDate(b.createdAt)) : "shipped with the build"}</td>
+                </tr>`).join("")}</tbody></table></div>
+              ${decided.length ? `<div class="divider"></div><div class="card__title">Recent decisions</div><div class="stack stack-2" style="margin-top:var(--sp-2)">${decided.map(b => `
+                <div class="listrow"><div class="listrow__main"><div class="listrow__title">${escapeHtml(b.title)}</div>
+                <div class="listrow__sub">${b.status === "approved" ? "approved" : "rejected"}${b.note ? " &middot; " + escapeHtml(b.note) : ""}${b.decidedAt ? " &middot; " + escapeHtml(S.ago(b.decidedAt)) : ""}</div></div>
+                <span class="badge badge--${b.status === "approved" ? "paid" : "ended"}">${escapeHtml(b.status)}</span></div>`).join("")}</div>` : ""}
+            </div>`;
+
+          on(qs("#addBook"), "click", () => bookForm());
+          if (!pending.length) {
+            qs("#pendingBooks").innerHTML = `<p class="small muted">The queue is empty. Every one of the ${shelf.length} books on the shelf was checked before it went up.</p>`;
+          } else {
+            qs("#pendingBooks").innerHTML = pending.map(b => `
+              <div class="card card--well">
+                <div class="row row--between" style="flex-wrap:wrap;gap:var(--sp-2)">
+                  <div><strong>${escapeHtml(b.title)}</strong> <span class="xs faint">${escapeHtml(b.author || "")}</span>
+                    <div class="xs" style="margin-top:4px"><span class="chip">${escapeHtml(b.subject)}</span> <span class="badge badge--draft">${escapeHtml(b.licence || "licence not stated")}</span></div>
+                    ${b.url ? `<div class="xs mono" style="margin-top:4px;word-break:break-all">${escapeHtml(b.url)}</div>` : ""}
+                    ${b.note ? `<p class="small" style="margin-top:6px">${escapeHtml(b.note)}</p>` : ""}
+                    <div class="xs faint" style="margin-top:4px">submitted ${escapeHtml(S.ago(b.createdAt))}</div>
+                  </div>
+                  <div class="row">
+                    <button class="btn btn--sm btn--success" data-ok="${escapeHtml(b.id)}">${icon("check")} Approve</button>
+                    <button class="btn btn--sm btn--danger" data-no="${escapeHtml(b.id)}">${icon("x")} Reject</button>
+                  </div>
+                </div>
+              </div>`).join("");
+            qsa("[data-ok]").forEach(btn => on(btn, "click", () => decide(btn.dataset.ok, "approved", btn)));
+            qsa("[data-no]").forEach(btn => on(btn, "click", () => decide(btn.dataset.no, "rejected", btn)));
+          }
+
+          function decide(id, status, btn) {
+            const b = queue.find(x => x.id === id);
+            const back = openModal(`
+              <div class="modal__head"><div class="modal__title">${status === "approved" ? "Put it on the shelf?" : "Reject this book?"}</div><button class="icon-btn" data-close aria-label="Close">${icon("x")}</button></div>
+              <div class="modal__body">
+                <p class="small"><strong>${escapeHtml(b.title)}</strong> &middot; claimed licence: ${escapeHtml(b.licence || "not stated")}</p>
+                ${status === "approved"
+                  ? `<p class="small muted">Confirm you actually opened the link and the licence allows free redistribution.</p>`
+                  : `<p class="small muted">Tell the submitter why, so they can fix it or drop it.</p>`}
+                <div class="field"><label class="label" for="decNote">${status === "approved" ? "Note (optional)" : "Reason"}</label><textarea class="textarea" id="decNote" rows="3" placeholder="${status === "approved" ? "e.g. Author's own site, CC BY 4.0, checked 6 Oct." : "e.g. This is a scan of a paid textbook."}"></textarea></div>
+              </div>
+              <div class="modal__foot"><button class="btn btn--ghost" data-close>Cancel</button>
+                <button class="btn ${status === "approved" ? "btn--success" : "btn--danger"}" id="decGo">${status === "approved" ? "Approve" : "Reject"}</button></div>`, { width: 560 });
+            on(qs("#decGo", back), "click", act(async () => {
+              await S.decideBook(id, status, qs("#decNote", back).value.trim());
+              closeModal(back);
+              toast(status === "approved" ? "\"" + b.title + "\" is on the shelf." : "\"" + b.title + "\" rejected.", { type: status === "approved" ? "success" : "info" });
+              await Promise.all([S.listPendingBooks(), S.refreshBooks()]);
+              renderTabs(); renderBooks(qs("#pane"));
+            }, qs("#decGo", back)));
+          }
+        }
+
+        function bookForm() {
+          const back = openModal(`
+            <div class="modal__head"><div class="modal__title">Add a book</div><button class="icon-btn" data-close aria-label="Close">${icon("x")}</button></div>
+            <div class="modal__body">
+              <p class="small muted">It lands in the licence queue, not straight on the shelf &mdash; even when you add it yourself.</p>
+              <div class="field"><label class="label" for="bkTitle">Title <span class="req">*</span></label><input class="input" id="bkTitle"></div>
+              <div class="field"><label class="label" for="bkAuthor">Author</label><input class="input" id="bkAuthor"></div>
+              <div class="grid grid-2">
+                <div class="field"><label class="label" for="bkSubject">Subject <span class="req">*</span></label><input class="input" id="bkSubject" list="subjList" placeholder="e.g. Algorithms"><datalist id="subjList">${S.bookSubjects().map(s => `<option value="${escapeHtml(s)}">`).join("")}</datalist></div>
+                <div class="field"><label class="label" for="bkLic">Licence <span class="req">*</span></label><select class="select" id="bkLic"><option value="">Choose…</option>${["Public domain", "CC BY", "CC BY-SA", "CC BY-NC", "Author-hosted free", "OpenAccess", "Other (state in note)"].map(l => `<option>${l}</option>`).join("")}</select></div>
+              </div>
+              <div class="field"><label class="label" for="bkUrl">Link to the legal copy <span class="req">*</span></label><input class="input" id="bkUrl" type="url" placeholder="https://"></div>
+              <div class="field"><label class="label" for="bkNote">Why it's free</label><textarea class="textarea" id="bkNote" rows="3"></textarea></div>
+              <div id="bkErrs"></div>
+            </div>
+            <div class="modal__foot"><button class="btn btn--ghost" data-close>Cancel</button><button class="btn btn--primary" id="bkGo">${icon("send")} Send to queue</button></div>`, { width: 620 });
+
+          on(qs("#bkGo", back), "click", act(async () => {
+            const v = id => qs(id, back).value.trim();
+            const errs = [];
+            if (v("#bkTitle").length < 2) errs.push("Give it a title.");
+            if (!v("#bkSubject")) errs.push("Pick or type a subject.");
+            if (!v("#bkLic")) errs.push("Pick the licence it's actually under.");
+            if (!/^https:\/\/.+\..+/.test(v("#bkUrl"))) errs.push("Add a working https link to the legal copy.");
+            if (errs.length) { qs("#bkErrs", back).innerHTML = `<div class="warnbar">${icon("alert")}<div>${errs.map(escapeHtml).join("<br>")}</div></div>`; return; }
+            await S.submitBook({ title: v("#bkTitle"), author: v("#bkAuthor"), subject: v("#bkSubject"), licence: v("#bkLic"), url: v("#bkUrl"), note: v("#bkNote") });
+            closeModal(back);
+            toast("Queued for a licence check.", { type: "success" });
+            await S.listPendingBooks();
+            renderTabs(); renderBooks(qs("#pane"));
+          }, qs("#bkGo", back)));
+        }
+
+        /* =========================================================
+           ACCOUNTS
+           ========================================================= */
+        function renderUsers(pane) {
+          const all = S.state.users;
+          pane.innerHTML = `
+            <div class="row row--between" style="align-items:flex-end;flex-wrap:wrap;gap:var(--sp-3);margin-bottom:var(--sp-4)">
+              <div>
+                <h2 class="h-display" style="font-size:var(--fs-3)">Accounts</h2>
+                <p class="small muted" id="uCount"></p>
+              </div>
+              <div class="field" style="margin:0;min-width:240px"><label class="label" for="uSearch">Search</label><input class="input" id="uSearch" type="search" value="${escapeHtml(uSearch)}" placeholder="name, username, email, mobile"></div>
+            </div>
+            <div id="uList"></div>`;
+          let t = null;
+          on(qs("#uSearch"), "input", e => {
+            uSearch = e.target.value;
+            clearTimeout(t);
+            // Search runs on the server; wait for a pause in typing.
+            t = setTimeout(async () => { try { await S.listUsers(uSearch); drawUsers(); } catch (err) { toast(err.message, { type: "error" }); } }, 300);
+          });
+          drawUsers();
+        }
+
+        function drawUsers() {
+          const box = qs("#uList"); if (!box) return;
+          const list = S.state.users;
+          const count = qs("#uCount");
+          if (count) count.innerHTML = `${list.length} shown${uSearch ? " for &ldquo;" + escapeHtml(uSearch) + "&rdquo;" : ""} &middot; ${list.filter(u => u.verified).length} verified by OTP &middot; ${list.filter(u => u.isAdmin).length} admins`;
+          box.innerHTML = list.length ? `
+            <div class="table-wrap"><table class="table">
+              <thead><tr><th>Player</th><th>Contact</th><th>Status</th><th>Payout details</th><th>Played</th><th>Joined</th><th></th></tr></thead>
+              <tbody>${list.map(u => `<tr>
+                <td><div class="row row--tight">${avatarHtml(u, "sm")}<div><strong>${escapeHtml(u.name)}</strong><div class="xs faint">@${escapeHtml(u.username)}${u.isAdmin ? ' &middot; <span class="src src--custom">admin</span>' : ""}</div></div></div></td>
+                <td class="xs">${escapeHtml(u.email)}<div class="faint">${escapeHtml(u.mobile || "")}</div></td>
+                <td>${u.verified ? '<span class="badge badge--paid">verified</span>' : '<span class="badge badge--draft">OTP pending</span>'}</td>
+                <td>${u.payout ? `<span class="badge badge--${u.payout.status === "verified" ? "paid" : u.payout.status === "flagged" ? "live" : "draft"}">${escapeHtml(u.payout.status)}</span><div class="xs faint">${u.payout.upi ? "UPI" : "bank"}</div>` : '<span class="xs faint">none saved</span>'}</td>
+                <td class="mono">${(u.stats || {}).roomsPlayed || 0}</td>
+                <td class="xs">${escapeHtml(S.fmtDate(u.createdAt))}</td>
+                <td>${u.id === me.id ? '<span class="xs faint">you</span>' : `<button class="btn btn--sm btn--quiet" data-role="${escapeHtml(u.id)}">${u.isAdmin ? "Remove admin" : "Make admin"}</button>`}</td>
+              </tr>`).join("")}</tbody></table></div>
+            <p class="xs faint" style="margin-top:var(--sp-3)">Flagged payout details mean the account-holder name didn't match the profile name &mdash; hold the payout and check it by hand.</p>`
+            : emptyState("No account matches that.", "Try the username or the mobile number instead.");
+
+          qsa("[data-role]").forEach(b => on(b, "click", act(async () => {
+            const u = S.getUserById(b.dataset.role);
+            const ok = await confirmDialog({
+              title: u.isAdmin ? "Remove admin from " + u.name + "?" : "Make " + u.name + " an admin?",
+              body: `<p class="small">${u.isAdmin ? "They lose access to the question bank, licences, disputes and the ledger." : "They get full access to the question bank, licences, disputes and the ledger. Only do this for platform staff."}</p>`,
+              okText: u.isAdmin ? "Remove role" : "Grant role", danger: u.isAdmin
+            });
+            if (!ok) return;
+            await S.grantAdmin(u.id, !u.isAdmin);
+            toast(u.name + (u.isAdmin ? " no longer has admin." : " is now an admin."), { type: "success" });
+            await S.listUsers(uSearch);
+            drawUsers();
+          }, b)));
+        }
+
+        /* =========================================================
+           DISPUTES
+           ========================================================= */
+        function renderDisputes(pane) {
+          pane.innerHTML = `
+            <div style="margin-bottom:var(--sp-4)">
+              <h2 class="h-display" style="font-size:var(--fs-3)">Disputes</h2>
+              <p class="small muted">An open dispute blocks that room's payouts until you resolve it (PRD &sect;5). Hosts can see the block but can't clear it themselves.</p>
+            </div>
+            <div class="card card--sticker" style="margin-bottom:var(--sp-4)">
+              <div class="card__title">${icon("alert")} Open <span class="badge badge--live">${openDisputes.length}</span></div>
+              <div class="stack stack-3" style="margin-top:var(--sp-3)" id="openD"></div>
+            </div>
+            <div class="card">
+              <div class="card__title">Resolved (${resolvedDisputes.length})</div>
+              <div class="stack stack-2" style="margin-top:var(--sp-2)" id="resD"></div>
+            </div>`;
+
+          const roomOf = d => disputeRooms[d.roomId] || S.getRoom(d.roomId);
+
+          qs("#openD").innerHTML = openDisputes.length ? openDisputes.map(d => {
+            const r = roomOf(d), u = S.getUserById(d.userId);
+            return `<div class="card card--well">
+              <div class="row row--between" style="flex-wrap:wrap;gap:var(--sp-3)">
+                <div>
+                  <strong>${escapeHtml(r ? r.name : "Room removed")}</strong>
+                  <div class="xs faint">${r ? escapeHtml(r.hostName || "") + (r.prizePoolPaise ? " &middot; " + S.formatInr(r.prizePoolPaise) + " pool" : "") : ""}</div>
+                  <p class="small" style="margin-top:6px">${escapeHtml(d.reason)}</p>
+                  <div class="xs faint">raised by ${escapeHtml(u ? u.name : "a player")} &middot; ${escapeHtml(S.ago(d.at))}</div>
+                </div>
+                <div class="row">
+                  ${r && r.id ? `<a class="btn btn--sm btn--ghost" href="host-dashboard.html?room=${escapeHtml(r.id)}">${icon("camera")} Proctoring</a>` : ""}
+                  <button class="btn btn--sm btn--primary" data-res="${escapeHtml(d.id)}">${icon("check")} Resolve</button>
+                </div>
+              </div></div>`;
+          }).join("") : `<p class="small muted">Nothing open. Payouts are flowing.</p>`;
+
+          qs("#resD").innerHTML = resolvedDisputes.length ? resolvedDisputes.map(d => {
+            const r = roomOf(d), u = S.getUserById(d.userId);
+            return `<div class="listrow"><div class="listrow__main">
+              <div class="listrow__title">${escapeHtml(r ? r.name : "Room removed")}</div>
+              <div class="listrow__sub">${escapeHtml(d.reason)}</div>
+              <div class="listrow__sub">${escapeHtml(u ? u.name : "player")} &middot; resolved ${escapeHtml(S.ago(d.at))}${d.resolution ? " &middot; " + escapeHtml(d.resolution) : ""}</div>
+            </div><span class="badge badge--paid">resolved</span></div>`;
+          }).join("") : `<p class="small muted">No disputes resolved yet.</p>`;
+
+          qsa("[data-res]").forEach(b => on(b, "click", () => {
+            const d = openDisputes.find(x => x.id === b.dataset.res);
+            const r = roomOf(d);
+            const back = openModal(`
+              <div class="modal__head"><div class="modal__title">Resolve dispute</div><button class="icon-btn" data-close aria-label="Close">${icon("x")}</button></div>
+              <div class="modal__body">
+                <p class="small"><strong>${escapeHtml(r ? r.name : "Room")}</strong> &middot; ${escapeHtml(d.reason)}</p>
+                ${r && r.prizePoolPaise ? `<p class="small muted">Resolving unblocks ${money(r.prizePoolPaise - S.platformFee(r.prizePoolPaise))} of prizes (after the 1% platform fee). The host settles from their dashboard.</p>` : ""}
+                <div class="field"><label class="label" for="resNote">What did you find? <span class="req">*</span></label><textarea class="textarea" id="resNote" rows="3" placeholder="e.g. Reviewed the snapshots at 21:04 and 21:09 — same room, no second person. Lock lifted."></textarea>
+                <span class="hint">This note is kept with the room record and the player is notified.</span></div>
+              </div>
+              <div class="modal__foot"><button class="btn btn--ghost" data-close>Cancel</button><button class="btn btn--primary" id="resGo">Resolve &amp; unblock payouts</button></div>`, { width: 600 });
+            on(qs("#resGo", back), "click", act(async () => {
+              const note = qs("#resNote", back).value.trim();
+              if (note.length < 5) { qs("#resNote", back).classList.add("is-invalid"); toast("Write down what you found — five characters at least.", { type: "error" }); return; }
+              await S.resolveDispute(d.id, note);
+              closeModal(back);
+              toast("Dispute resolved. Payouts unblocked.", { type: "success" });
+              await Promise.all([loadDisputes(), S.refreshRooms()]);
+              renderTabs(); renderDisputes(qs("#pane"));
+            }, qs("#resGo", back)));
+          }));
+        }
+
+        /* =========================================================
+           MONEY
+           ========================================================= */
+        function renderMoney(pane) {
+          const t = totals;
+          const ledger = S.state.ledger.slice(0, 40);
+          const payouts = S.state.payouts;
+          const escrow = S.state.payments.filter(p => p.status === "escrow");
+          pane.innerHTML = `
+            <div style="margin-bottom:var(--sp-4)">
+              <h2 class="h-display" style="font-size:var(--fs-3)">Money</h2>
+              <p class="small muted">Entry fees sit in escrow until a tournament ends; prizes go out after the 1% platform fee; anything cancelled is refunded in full (PRD &sect;5). All amounts are stored as integer paise. No live payment gateway is attached to this build, so these are records of what would move, not captured funds.</p>
+            </div>
+            <div class="grid grid-4" style="margin-bottom:var(--sp-5)">
+              ${stat("In escrow now", t.escrowHeld, "entry fees held")}
+              ${stat("Prizes paid out", t.prizesPaid, "to winners")}
+              ${stat("Refunded", t.refunds, "cancelled / short rooms")}
+              ${stat("Platform fees", t.fees, "1% of settled pools")}
+            </div>
+            <div class="split split--60-40" style="align-items:start">
+              <div class="stack stack-5">
+                <div class="card">
+                  <div class="card__title">Entry fees in escrow (${escrow.length})</div>
+                  ${escrow.length ? `<div class="table-wrap" style="margin-top:var(--sp-2)"><table class="table"><thead><tr><th>Room</th><th>Player</th><th>Amount</th><th>Held since</th></tr></thead>
+                    <tbody>${escrow.map(p => { const r = S.getRoom(p.roomId), u = S.getUserById(p.userId); return `<tr><td>${escapeHtml(r ? r.name : "—")}</td><td>${escapeHtml(u ? u.name : "—")}</td><td class="mono">${money(p.amountPaise)}</td><td class="xs">${escapeHtml(S.ago(p.at))}</td></tr>`; }).join("")}</tbody></table></div>`
+                    : `<p class="small muted" style="margin-top:6px">No entry fees are being held right now.</p>`}
+                </div>
+                <div class="card">
+                  <div class="card__title">Prize payouts (${payouts.length})</div>
+                  ${payouts.length ? `<div class="table-wrap" style="margin-top:var(--sp-2)"><table class="table"><thead><tr><th>Room</th><th>Winner</th><th>Rank</th><th>Amount</th><th>Status</th></tr></thead>
+                    <tbody>${payouts.map(p => { const r = S.getRoom(p.roomId), u = S.getUserById(p.userId); return `<tr><td>${escapeHtml(r ? r.name : "—")}</td><td>${escapeHtml(u ? u.name : "—")}</td><td class="mono">#${p.rank}</td><td class="mono">${money(p.amountPaise)}</td><td><span class="badge badge--${p.status === "paid" ? "paid" : "draft"}">${escapeHtml(p.status)}</span></td></tr>`; }).join("")}</tbody></table></div>`
+                    : `<p class="small muted" style="margin-top:6px">No tournament has settled yet.</p>`}
+                </div>
+              </div>
+              <div class="card">
+                <div class="card__title">Ledger (latest ${ledger.length})</div>
+                ${ledger.length ? `<div class="stack stack-2" style="margin-top:var(--sp-2);max-height:520px;overflow:auto">${ledger.map(l => {
+                  const u = l.userId ? S.getUserById(l.userId) : null;
+                  return `<div class="listrow"><div class="listrow__main">
+                    <div class="listrow__title">${escapeHtml(l.note)}</div>
+                    <div class="listrow__sub">${u ? escapeHtml(u.name) : "platform"} &middot; ${escapeHtml(l.type)} &middot; ${escapeHtml(S.ago(l.at))}</div></div>
+                    <strong class="mono ${l.amountPaise < 0 ? "amt-neg" : "amt-pos"}">${l.amountPaise < 0 ? "−" : "+"}${money(Math.abs(l.amountPaise))}</strong></div>`;
+                }).join("")}</div>` : `<p class="small muted" style="margin-top:6px">The ledger is empty. It fills up as rooms are funded, joined and settled.</p>`}
+              </div>
+            </div>`;
+
+          function stat(label, paise, sub) {
+            return `<div class="card card--well center"><div class="stat"><div class="stat__num">${money(paise)}</div><div class="stat__label">${label}</div></div><div class="xs faint">${sub}</div></div>`;
+          }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
