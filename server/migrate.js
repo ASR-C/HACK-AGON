@@ -13,6 +13,7 @@ const config = require("./config");
     port: config.db.port,
     user: config.db.user,
     password: config.db.password,
+    ...(config.db.ssl ? { ssl: { rejectUnauthorized: true } } : {}),
     multipleStatements: true
   });
 
@@ -24,7 +25,8 @@ const config = require("./config");
   const check = await mysql.createConnection({
     host: config.db.host, port: config.db.port,
     user: config.db.user, password: config.db.password,
-    database: config.db.database
+    database: config.db.database,
+    ...(config.db.ssl ? { ssl: { rejectUnauthorized: true } } : {})
   });
   const [tables] = await check.query("SHOW TABLES");
   const [ver] = await check.query("SELECT VERSION() AS v");

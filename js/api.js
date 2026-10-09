@@ -8,7 +8,7 @@
 (function () {
   const TOKEN_KEY = "hackagon.token";
   // Same origin when served by the Node server; override for a split dev setup.
-  const BASE = (window.HACKAGON_API || location.origin.replace(/:8123$/, ":8080")) + "/api";
+  const BASE = (window.HACKAGON_API || "") + "/api";
 
   const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } };
   const setToken = t => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ } };

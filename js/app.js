@@ -208,7 +208,7 @@
       <div class="card__title">${icon("alert")} Can't reach the HackAgon server</div>
       <p class="lead">${escapeHtml(message || "The API didn't answer.")}</p>
       <p class="small muted">Start it with <code>cd server &amp;&amp; npm start</code>, then open
-      <code>http://localhost:8080</code>. The database is MySQL &mdash; run <code>npm run setup</code> in
+      <code>${escapeHtml(location.origin)}</code>. The database is MySQL &mdash; run <code>npm run setup</code> in
       <code>server/</code> once if this is a fresh checkout.</p>
       <div class="row" style="margin-top:var(--sp-4)"><button class="btn btn--primary" onclick="location.reload()">${icon("refresh")} Try again</button></div>
     </div>`;

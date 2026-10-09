@@ -6,14 +6,15 @@ const bool = (v, d) => (v === undefined || v === "" ? d : String(v).toLowerCase(
 const num = (v, d) => (v === undefined || v === "" || isNaN(Number(v)) ? d : Number(v));
 
 const config = {
-  port: num(process.env.PORT, 8080),
+  port: num(process.env.PORT, 3000),
   root: path.resolve(__dirname, ".."),
   db: {
     host: process.env.DB_HOST || "localhost",
     port: num(process.env.DB_PORT, 3306),
     user: process.env.DB_USER || "root",
-    password: process.env.DB_PASS || "",
-    database: process.env.DB_NAME || "hackagon"
+    password: process.env.DB_PASSWORD || process.env.DB_PASS || "",
+    database: process.env.DB_NAME || "hackagon",
+    ssl: bool(process.env.DB_SSL, false)
   },
   jwt: {
     secret: process.env.JWT_SECRET || "hackagon-insecure-dev-secret",

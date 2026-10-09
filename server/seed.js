@@ -87,9 +87,9 @@ async function main() {
   /* --- platform-run practice rooms --- */
   const existing = await db.one("SELECT COUNT(*) AS c FROM rooms WHERE platform = 1");
   if (Number(existing.c) === 0) {
-    SEED.platformRooms.forEach((pr, i) => {
+    for (const [i, pr] of SEED.platformRooms.entries()) {
       const start = now() + (i * 3 + 1) * 60 * 1000;
-      return db.run(
+      await db.run(
         `INSERT INTO rooms (id,type,host_id,host_name,name,format,size,squad_size,langs,topics,question_ids,
            duration_min,time_per_q,visibility,invite_code,prize_pool_paise,entry_fee_paise,tournament_mode,
            snapshot_secs,status,start_time,platform,prize_preset,split,min_players,funded,org,results_locked,
@@ -98,7 +98,7 @@ async function main() {
         [uid("room"), pr.name, JSON.stringify(SEED.ALL_LANGS), JSON.stringify(pr.topics), JSON.stringify(pr.questions),
          pr.durationMin, i === 0 ? "live" : "open", i === 0 ? now() - 60000 : start, now()]
       );
-    });
+    }
     await db.run(
       `INSERT INTO rooms (id,type,host_id,host_name,name,format,size,squad_size,langs,topics,question_ids,
          duration_min,time_per_q,visibility,invite_code,prize_pool_paise,entry_fee_paise,tournament_mode,
@@ -120,11 +120,15 @@ async function main() {
   console.log("\nDatabase now holds:", counts);
   console.log("Tip: list your admin addresses in server/.env as ADMIN_EMAILS=a@b.com,c@d.com");
   console.log("     or promote one later with: node make-admin.js you@example.com");
-  await db.pool.end();
 }
 
-main().catch(async err => {
-  console.error("Seed failed:", err.message);
-  try { await db.pool.end(); } catch (e) { /* ignore */ }
-  process.exit(1);
-});
+main()
+  .catch(err => {
+    console.error("Seed failed:", err.message);
+    process.exitCode = 1;
+  })
+  .finally(() => db.pool.end())
+  .catch(err => {
+    console.error("Failed to close database pool:", err.message);
+    process.exitCode = 1;
+  });

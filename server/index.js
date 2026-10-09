@@ -1,5 +1,4 @@
-/* HackAgon server — single origin: the API and the static front-end.
-   Start with `npm start` in server/, then open http://localhost:8080. */
+/* HackAgon server — single origin: the API and the static front-end. */
 
 const path = require("path");
 const express = require("express");
@@ -38,6 +37,15 @@ app.get("/api/health", async (_req, res) => {
   });
 });
 
+app.get("/health", async (_req, res) => {
+  try {
+    await db.one("SELECT 1 AS ok");
+  } catch (e) {
+    console.error("Health check database query failed:", e.message);
+  }
+  res.status(200).type("text/plain").send("ok");
+});
+
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api", require("./routes/content"));
 app.use("/api/rooms", require("./routes/rooms"));
@@ -50,8 +58,11 @@ app.use("/api/ai", require("./routes/ai"));
 /* unknown API route -> JSON 404, not the HTML shell */
 app.use("/api", (_req, res) => res.status(404).json({ ok: false, error: "No such endpoint." }));
 
+/* Keep backend files and configuration out of the public static root. */
+app.use("/server", (_req, res) => res.sendStatus(404));
+
 /* the front-end */
-app.use(express.static(config.root, { extensions: ["html"], maxAge: "0" }));
+app.use(express.static(config.root, { dotfiles: "deny", extensions: ["html"], maxAge: "0" }));
 app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(config.root, "index.html")));
 
 /* error handler */
@@ -71,9 +82,8 @@ app.use((err, _req, res, _next) => {
     const v = await db.ping();
     console.log(`MySQL ${v} — connected to "${config.db.database}".`);
   } catch (e) {
-    console.error("Cannot reach MySQL:", e.message);
-    console.error("Start the server, check server/.env, then run: npm run migrate && npm run seed");
-    process.exit(1);
+    console.error("Cannot reach MySQL at startup:", e.message);
+    console.error("Check the database environment variables and run the schema migration/seed if needed.");
   }
 
   if (mail.enabled()) {
@@ -85,8 +95,9 @@ app.use((err, _req, res, _next) => {
   console.log(groq.configured() ? `Groq coach ready (${config.groq.model}).` : "GROQ_API_KEY missing — AI coach disabled.");
 
   app.listen(config.port, () => {
-    console.log(`\nHackAgon running at http://localhost:${config.port}`);
-    console.log(`API base       http://localhost:${config.port}/api`);
-    console.log(`Health check   http://localhost:${config.port}/api/health\n`);
+    const port = config.port;
+    console.log(`\nHackAgon running on port ${port}`);
+    console.log(`API base       /api`);
+    console.log(`Health check   /health\n`);
   });
 })();

@@ -2,9 +2,9 @@
    submit code -> settle prize. Run with the server already up.
    Usage: node smoke.js [email] [password] */
 
-const BASE = "http://localhost:8080/api";
-const EMAIL = process.argv[2] || "akshatrathorerevoluate@gmail.com";
-const PASS = process.argv[3] || "Hackagon@2026";
+const BASE = `http://localhost:${process.env.PORT || 3000}/api`;
+const EMAIL = process.argv[2];
+const PASS = process.argv[3];
 
 let token = null;
 async function call(method, path, body, opts = {}) {
@@ -22,6 +22,10 @@ const ok = (label, cond, extra) => console.log(`${cond ? "PASS" : "FAIL"}  ${lab
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 (async () => {
+  if (!EMAIL || !PASS) {
+    throw new Error("Usage: node smoke.js <email> <password>");
+  }
+
   /* --- login (may ask for verification first) --- */
   let login = await call("POST", "/auth/login", { identifier: EMAIL, password: PASS }, { anon: true, soft: true });
   if (login.json.needVerify) {

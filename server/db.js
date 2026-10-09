@@ -7,9 +7,11 @@ const pool = mysql.createPool({
   user: config.db.user,
   password: config.db.password,
   database: config.db.database,
+  ...(config.db.ssl ? { ssl: { rejectUnauthorized: true } } : {}),
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 5,
   queueLimit: 0,
+  connectTimeout: 10000,
   charset: "utf8mb4_unicode_ci",
   // JSON columns come back parsed already; keep numbers as JS numbers.
   supportBigNumbers: true,
