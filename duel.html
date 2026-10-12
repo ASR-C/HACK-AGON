@@ -73,9 +73,7 @@
         </div>
       </div>
     </div>
-  </main>
-
-  <script src="js/api.js"></script>
+  </main>  <script src="js/api.js"></script>
   <script src="js/store.js"></script>
   <script src="js/app.js"></script>
   <script>
@@ -91,97 +89,167 @@
 
         qs("#dLang").innerHTML = SEED.languages.map(l => `<option value="${l.id}">${l.label}</option>`).join("");
         let picked = [];
+        const allQ = S.listQuestions();
+
         function renderPick() {
-          qs("#qPick").innerHTML = S.listQuestions().map(q => `<label class="check" style="padding:4px 0"><input type="checkbox" value="${q.id}" ${picked.includes(q.id) ? "checked" : ""}><span class="check__box">${icon("check")}</span><span class="check__text">${escapeHtml(q.title)} <span class="xs faint">· ${q.difficulty}</span></span></label>`).join("");
+          if (!allQ.length) {
+            qs("#qPick").innerHTML = '<p class="small faint">No questions available. Try refreshing.</p>';
+            return;
+          }
+          qs("#qPick").innerHTML = allQ.map(q => `<label class="check" style="padding:4px 0"><input type="checkbox" value="${q.id}" ${picked.includes(q.id) ? "checked" : ""}><span class="check__box">${icon("check")}</span><span class="check__text">${escapeHtml(q.title)} <span class="xs faint">· ${q.difficulty}</span></span></label>`).join("");
           qs("#qCount").textContent = picked.length + "/3 selected";
         }
         on(qs("#qPick"), "change", e => {
           const id = e.target.value;
           if (e.target.checked) { if (picked.length >= 3) { e.target.checked = false; toast("Three questions max in a duel.", { type: "error" }); return; } picked.push(id); }
           else picked = picked.filter(x => x !== id);
+          qs("#qCount").textContent = picked.length + "/3 selected";
+        });
+        on(qs("#autoQ"), "click", () => {
+          picked = allQ.slice(0, 2).map(q => q.id);
           renderPick();
         });
-        on(qs("#autoQ"), "click", () => { picked = S.listQuestions().slice(0, 2).map(q => q.id); renderPick(); });
         renderPick();
 
         let mode = "auto";
         on(qs("#modeSeg"), "change", e => {
           mode = e.target.value;
-          qs("#modeHint").textContent = mode === "auto" ? "We’ll pair you with whoever’s waiting. This duel is always free and unranked." : "You’ll get a code to share for a free, unranked practice duel.";
+          qs("#modeHint").textContent = mode === "auto" ? "We'll pair you with whoever's waiting. This duel is always free and unranked." : "You'll get a code to share for a free, unranked practice duel.";
           qs("#goBtn").textContent = mode === "auto" ? "Find a practice opponent" : "Create practice invite";
         });
 
         function renderOpen() {
-          const duels = S.listRooms({ type: "duel", status: ["open", "live"] });
-          qs("#openDuels").innerHTML = duels.length ? duels.map(roomTile).join("") : emptyState("No open duels right now.", "Start one above and we'll find you an opponent.");
+          const duels = S.listRooms({ type: "duel", status: ["open", "live"] }).filter(r => r.hostId !== me.id);
+          qs("#openDuels").innerHTML = duels.length
+            ? duels.map(r => `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border:var(--bw) solid var(--border);border-radius:var(--r-md);gap:8px">
+                <div><div class="small" style="font-weight:700">${escapeHtml(r.name)}</div><div class="xs faint">${r.durationMin}min · ${(r.langs||[]).join(', ')}</div></div>
+                <button class="btn btn--sm btn--primary" data-join-duel="${r.id}">Join</button>
+              </div>`).join("")
+            : emptyState("No open duels right now.", "Start one above and we'll find you an opponent.");
         }
         renderOpen();
 
+        // Handle join from open duels list
+        on(qs("#openDuels"), "click", e => {
+          const btn = e.target.closest("[data-join-duel]"); if (!btn) return;
+          act(async () => {
+            const joined = await S.joinRoom(btn.dataset.joinDuel);
+            toast("Joined the duel! Good luck.", { type: "success" });
+            location.href = "match.html?room=" + joined.id;
+          }, btn)();
+        });
+
         let currentCode = "";
+        let waitInterval = null;
         on(qs("#copyCode"), "click", () => { navigator.clipboard && navigator.clipboard.writeText(currentCode); toast("Code copied.", { type: "success" }); });
 
         function showCode(room, note) {
           currentCode = room.inviteCode || "";
           qs("#inviteBox").classList.remove("hide");
-          qs("#inviteCode").textContent = currentCode || "—";
+          qs("#inviteCode").textContent = currentCode || "(public — share the link below)";
           qs("#waitNote").textContent = note;
+          // Show shareable link
+          const link = location.origin + "/match.html?room=" + encodeURIComponent(room.id);
+          const existingLink = qs("#shareLink");
+          if (!existingLink) {
+            qs("#inviteBox").insertAdjacentHTML("beforeend",
+              `<div style="margin-top:8px"><span class="xs faint">Or share this link: </span><code class="mono xs" id="shareLink" style="word-break:break-all">${escapeHtml(link)}</code>
+              <button class="btn btn--sm btn--ghost" style="margin-top:4px" id="copyLink">Copy link</button></div>`);
+            on(qs("#copyLink"), "click", () => { navigator.clipboard && navigator.clipboard.writeText(link); toast("Link copied.", { type: "success" }); });
+          }
         }
 
         /* Poll until a real second player takes the seat. */
-        function waitForOpponent(roomId) {
+        function waitForOpponent(roomId, cancelBtn) {
+          if (waitInterval) clearInterval(waitInterval);
           qs("#goBtn").disabled = true;
           let tries = 0;
-          const tick = setInterval(async () => {
+          waitInterval = setInterval(async () => {
             tries++;
             let r;
             try { r = await S.fetchRoom(roomId); } catch (e) { return; }
-            if (r.players.length >= 2) {
-              clearInterval(tick);
-              toast("Opponent found. Good luck.", { type: "success" });
+            if (r.players.length >= 2 || r.status === "live") {
+              clearInterval(waitInterval); waitInterval = null;
+              toast("Opponent found! Good luck.", { type: "success" });
               location.href = "match.html?room=" + r.id;
-            } else if (tries >= 24) {
-              clearInterval(tick);
+            } else if (tries >= 36) { // 3 minutes
+              clearInterval(waitInterval); waitInterval = null;
               qs("#goBtn").disabled = false;
-              qs("#waitNote").textContent = "Still no opponent. Leave the duel open — anyone can join with the code — or try again later.";
+              qs("#waitNote").textContent = "Still no opponent after 3 minutes. The duel stays open — anyone can join with the code or link — or try again.";
             }
           }, 5000);
+          if (cancelBtn) {
+            on(cancelBtn, "click", () => {
+              if (waitInterval) { clearInterval(waitInterval); waitInterval = null; }
+              qs("#goBtn").disabled = false;
+              qs("#inviteBox").classList.add("hide");
+              toast("Stopped waiting. Your duel is still open on the board.", { type: "info" });
+            });
+          }
         }
 
         on(qs("#goBtn"), "click", act(async () => {
-          if (!picked.length) { toast("Pick at least one question first.", { type: "error" }); return; }
+          if (!picked.length) {
+            if (allQ.length) {
+              picked = allQ.slice(0, 2).map(q => q.id);
+              renderPick();
+            } else {
+              toast("No questions available right now.", { type: "error" });
+              return;
+            }
+          }
           const dur = Math.max(5, Math.min(60, Number(qs("#dDur").value) || 15));
+          const selectedLang = qs("#dLang").value;
 
           if (mode === "auto") {
-            // Real matchmaking: take the open duel someone else is already waiting in.
+            // Refresh rooms from server first for accurate matchmaking
             await S.refreshRooms().catch(() => {});
             const waiting = S.listRooms({ type: "duel", status: "open" })
               .find(r => r.hostId !== me.id && r.players.length === 1 && !r.players.some(p => p.userId === me.id));
+
             if (waiting) {
               const joined = await S.joinRoom(waiting.id);
-              toast("Matched with " + (joined.players[0].name.split(" ")[0]) + ". Good luck.", { type: "success" });
+              toast("Matched! Good luck.", { type: "success" });
               location.href = "match.html?room=" + joined.id;
               return;
             }
           }
 
+          // Create a new duel room
+          const duelName = mode === "invite"
+            ? "Practice: " + me.name.split(" ")[0] + "'s invite duel"
+            : "Practice: " + me.name.split(" ")[0] + " looking for opponent";
+
           const room = await S.createRoom({
-            type: "duel",             name: "Practice: " + me.name.split(" ")[0] + " vs " + (mode === "auto" ? "whoever's next" : "a friend"),
-            format: "Duel", size: 2, langs: [qs("#dLang").value], topics: [], questionIds: picked,
-            durationMin: dur, visibility: mode === "invite" ? "Private" : "Public",
-            tournamentMode: false, publish: true, funded: true
+            type: "duel",
+            name: duelName,
+            format: "Duel", size: 2,
+            langs: [selectedLang],
+            topics: [],
+            questionIds: picked,
+            durationMin: dur,
+            visibility: mode === "invite" ? "Private" : "Public",
+            tournamentMode: false,
+            publish: true,
+            funded: true
           });
 
           if (mode === "invite") {
-            showCode(room, "Send this to one person. The duel starts when they join.");
-            toast("Duel created. Send the code.", { type: "success" });
-            renderOpen();
-            waitForOpponent(room.id);
-            return;
+            showCode(room, "Send this code or link to your friend. The duel starts the moment they join.");
+            toast("Invite duel created! Send the code.", { type: "success" });
+          } else {
+            showCode(room, "You're in the queue. Checking every 5 seconds for a real opponent. No bots — it needs another person online.");
+            toast("No one's waiting right now — your duel is now open on the board.", { type: "info" });
           }
-          showCode(room, "You're in the queue. This page checks every 5 seconds for a real opponent — no bots, so it needs another person online.");
-          toast("No one's waiting right now, so your duel is open on the board.", { type: "info" });
+
+          // Add cancel button
+          const cancelArea = qs("#inviteBox");
+          if (!qs("#cancelWait", cancelArea)) {
+            cancelArea.insertAdjacentHTML("beforeend", `<button class="btn btn--sm btn--ghost" id="cancelWait" style="margin-top:8px">Stop waiting</button>`);
+          }
+
           renderOpen();
-          waitForOpponent(room.id);
+          waitForOpponent(room.id, qs("#cancelWait"));
         }, qs("#goBtn")));
       });
     })();

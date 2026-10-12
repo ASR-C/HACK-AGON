@@ -7,8 +7,8 @@
 
 (function () {
   const TOKEN_KEY = "hackagon.token";
-  // Same origin when served by the Node server; override for a split dev setup.
-  const BASE = (window.HACKAGON_API || "") + "/api";
+  // Same origin when served by the server (8080 or 3000); defaults to http://localhost:8080 for live preview ports.
+  const BASE = (window.HACKAGON_API || (location.port && location.port !== "8080" && location.port !== "3000" ? "http://localhost:8080" : "")) + "/api";
 
   const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } };
   const setToken = t => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ } };

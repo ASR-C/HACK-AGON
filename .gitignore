@@ -10,3 +10,9 @@ server/.env
 server/data/snapshots/
 .DS_Store
 Thumbs.db
+
+# Java build artefacts
+target/
+*.class
+.idea/
+*.iml

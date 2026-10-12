@@ -36,7 +36,7 @@
         let room = null;
         if (roomId) { try { room = await S.fetchRoom(roomId); } catch (e) { room = null; } }
         if (!room) { roomId = null; return renderPicker(); }
-        if (room.hostId !== me.id && !me.isAdmin) {
+        if (room.hostId !== me.id) {
           root.innerHTML = emptyState("This isn't your room.", "Only the host gets the dashboard.", '<a class="btn btn--primary" href="arena.html">Back to the Arena</a>');
           return;
         }

@@ -103,7 +103,7 @@
 
       function code() { return boxes.map(b => b.value).join(""); }
       function showError(msg) { const e = qs("#otpError"); e.style.display = "block"; e.textContent = msg; }
-      function clearError() { qs("#otpError").style.display = "none"; }
+      function clearError() { const e = qs("#otpError"); e.style.display = "none"; e.textContent = ""; }
 
       let tickTimer = null;
       function paintMeta() {
@@ -115,18 +115,35 @@
         const expired = left <= 0;
         qs("#verifyBtn").disabled = expired || tries <= 0;
         qs("#resendBtn").disabled = !S.canResend();
-        if (expired) showError("That code expired. Grab a fresh one below.");
+        if (expired) {
+          showError("That code expired. Grab a fresh one below.");
+        } else if (tries <= 0) {
+          showError("No attempts left. Grab a fresh one below.");
+        } else {
+          const errEl = qs("#otpError");
+          if (errEl.textContent.includes("expired") || errEl.textContent.includes("attempts left")) {
+            clearError();
+          }
+        }
       }
       function startTick() { if (tickTimer) clearInterval(tickTimer); paintMeta(); tickTimer = setInterval(paintMeta, 1000); }
 
       async function loadOtp(id) {
+        if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
         curId = id;
+        clearError();
+        if (id && window.history && window.history.replaceState) {
+          const u = new URL(location.href);
+          u.searchParams.set("otp", id);
+          window.history.replaceState({}, "", u.toString());
+        }
         if (!id) { showError("We couldn't find that code. Start over from sign up."); qs("#verifyBtn").disabled = true; return; }
         try {
           otp = await S.otpMeta(id);
         } catch (err) {
           otp = null; showError(err.message); qs("#verifyBtn").disabled = true; return;
         }
+        clearError();
         // Show delivery confirmation with masked address only — never the raw code.
         const box = qs("#devOtp");
         if (otp.target) {
@@ -142,6 +159,8 @@
       on(qs("#resendBtn"), "click", async () => {
         if (!curId) return;
         try {
+          if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+          clearError();
           const fresh = await S.resendOtp(curId);
           boxes.forEach(b => b.value = ""); boxes[0].focus(); clearError();
           toast(fresh.mailed ? "New code sent — check your email." : "Couldn't send the code. Check server mail config.", { type: fresh.mailed ? "info" : "error" });

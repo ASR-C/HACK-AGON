@@ -146,8 +146,29 @@
               <h1 style="margin-block:var(--sp-3)">Waiting room</h1>
               <p class="lead" style="margin-inline:auto"><span id="seatCount">${room.players.length} of ${room.size}</span> seats taken. ${proctored() ? "Camera and tab-lock will be on." : "No proctoring on this one."}</p>
               <div class="lobby__count" id="lobbyCount">${startIn != null && startIn > 0 ? S.fmtDuration(startIn) : "any moment"}</div>
-              <p class="hand muted" style="margin-top:var(--sp-3)">${room.hostId === me.id ? "you're the host — start it from the dashboard" : "starts when the host opens the floor"}</p>
-              ${room.hostId === me.id ? `<a class="btn btn--primary" style="margin-top:var(--sp-3)" href="host-dashboard.html?room=${encodeURIComponent(room.id)}">Open host dashboard</a>` : ""}
+              <p class="hand muted" style="margin-top:var(--sp-3)">${room.hostId === me.id ? "you're the host" : "starts when the host opens the floor"}</p>
+              ${room.hostId === me.id ? `
+                <div class="row row--tight" style="margin-top:var(--sp-3);flex-wrap:wrap;gap:8px;justify-content:center">
+                  <button class="btn btn--success btn--lg" id="lobbyStartBtn">${icon("play")} Start Match Now</button>
+                  <a class="btn btn--ghost" href="host-dashboard.html?room=${encodeURIComponent(room.id)}">${icon("eye")} Host Dashboard &amp; Proctor</a>
+                </div>` : ""}
+              <div class="lobby__players" style="margin-top:var(--sp-4);max-width:500px;margin-inline:auto;text-align:left">
+                <div class="small faint" style="font-weight:700;margin-bottom:8px">PLAYERS IN LOBBY (${room.players.length})</div>
+                <div class="stack stack-2" id="lobbyPlayerList">
+                  ${room.players.map(p => `
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md)">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        ${window.App.avatarHtml(p, "sm")}
+                        <span style="font-weight:600">${escapeHtml(p.name)}</span>
+                        ${p.userId === room.hostId ? '<span class="badge badge--accent" style="font-size:10px">Host</span>' : ''}
+                      </div>
+                      ${room.hostId === me.id && p.userId !== me.id ? `
+                        <button class="btn btn--sm btn--danger" data-kick-user="${p.userId}">Remove</button>
+                      ` : ''}
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
               ${proctored() ? `<div style="margin-top:var(--sp-5)"><button class="btn btn--primary btn--lg" id="camBtn">${icon("camera")} Allow camera to get ready</button><p class="xs faint" style="margin-top:8px">You can't start a proctored match without it.</p><button class="btn btn--quiet xs" id="camDemo" style="margin-top:6px">No camera here? run without one (stored as unverified)</button></div>` : ""}
             </div>
           </div>`;
@@ -160,9 +181,48 @@
         lobbyTimer = setInterval(async () => {
           try { room = await S.fetchRoom(room.id); } catch (e) { return; }
           const sc = qs("#seatCount"); if (sc) sc.textContent = room.players.length + " of " + room.size;
+          // Check if current player was removed from the room
+          const mySlot = room.players.find(p => p.userId === me.id);
+          if (!mySlot && room.hostId !== me.id) {
+            stopAll();
+            toast("You have been removed from this room by the host.", { type: "error" });
+            setTimeout(() => { location.href = "arena.html"; }, 2000);
+            return;
+          }
           if (room.status === "live") { clearInterval(lobbyTimer); clearInterval(clockTimer); begin(); }
           else if (room.status === "ended") { stopAll(); renderEnded(); }
         }, 3000);
+
+        const lobbyStartBtn = qs("#lobbyStartBtn");
+        if (lobbyStartBtn) {
+          on(lobbyStartBtn, "click", act(async () => {
+            if (room.hostId !== me.id) {
+              toast("Only the host of this room is allowed to start the match.", { type: "error" });
+              return;
+            }
+            if (room.players.length < room.minPlayers) {
+              toast(`Need at least ${room.minPlayers} players to start. Only ${room.players.length} joined so far.`, { type: "error" });
+              return;
+            }
+            await S.startRoom(room.id);
+            toast("Match started!", { type: "success" });
+          }, lobbyStartBtn));
+        }
+
+        const lobbyPlayerList = qs("#lobbyPlayerList");
+        if (lobbyPlayerList) {
+          on(lobbyPlayerList, "click", e => {
+            const btn = e.target.closest("[data-kick-user]");
+            if (!btn) return;
+            const targetId = btn.dataset.kickUser;
+            act(async () => {
+              await S.eliminatePlayer(room.id, targetId, "Removed by room host");
+              toast("Player removed from the room.", { type: "info" });
+              room = await S.fetchRoom(room.id);
+              renderLobby();
+            }, btn)();
+          });
+        }
 
         const camBtn = qs("#camBtn");
         if (camBtn) on(camBtn, "click", act(async () => {
@@ -194,7 +254,12 @@
               <div class="row row--tight">${window.App.statusBadge(room)} ${proctored() ? '<span class="badge badge--proctored">' + icon("camera") + ' proctored</span>' : ''}</div>
               <h2 style="margin-top:4px">${escapeHtml(room.name)}</h2>
             </div>
-            <div class="row">
+            <div class="row" style="align-items:center;gap:12px">
+              ${room.hostId === me.id ? `
+                <a class="btn btn--sm btn--primary" href="host-dashboard.html?room=${encodeURIComponent(room.id)}" target="_blank" title="Observe player activity, camera feeds, and proctor logs">
+                  ${icon("eye")} Observe Progress
+                </a>
+              ` : ''}
               <div class="qnav" id="qnav"></div>
               <div class="timer" id="timer">--:--</div>
             </div>
@@ -240,6 +305,23 @@
           renderBoard();
           if (room.status === "ended") { stopAll(); renderEnded(); return; }
           const p = seat();
+          // Detect if player was eliminated or removed from the room
+          if (!p && room.hostId !== me.id) {
+            stopAll();
+            toast("You have been removed from this match.", { type: "error" });
+            setTimeout(() => { location.href = "arena.html"; }, 2500);
+            return;
+          }
+          if (p && p.eliminated) {
+            stopAll();
+            root.innerHTML = `<div class="lobby" style="text-align:center"><div>
+              <span class="stamp">Eliminated</span>
+              <h2 style="margin-top:var(--sp-3)">You've been eliminated.</h2>
+              <p class="lead">${escapeHtml(p.elimReason || "The host removed you from this match.")}</p>
+              <a class="btn btn--primary" style="margin-top:var(--sp-4)" href="arena.html">Back to Arena</a>
+            </div></div>`;
+            return;
+          }
           if (p && p.locked) { stopAll(); showLock(p.lockReason); }
           checkEnd();
         }, 3000);

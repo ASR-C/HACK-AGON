@@ -273,7 +273,7 @@
   function roomTile(room) {
     const qCount = (room.questionIds || []).length;
     const me = S.currentUser();
-    const hostCanStart = me && (room.hostId === me.id || me.isAdmin) &&
+    const hostCanStart = me && (room.hostId === me.id) &&
       (room.type === "room" || room.type === "tournament") &&
       (room.status === "open" || room.status === "draft");
     const link = `${room.type === "tournament" ? "tournament-details.html" : "match.html"}?room=${encodeURIComponent(room.id)}`;

@@ -156,7 +156,7 @@ router.patch("/:id", auth.required, wrap(async (req, res) => {
 
 router.post("/:id/start", auth.required, wrap(async (req, res) => {
   const room = await D.requireRoom(req.params.id);
-  if (room.hostId !== req.user.id && !req.user.isAdmin) forbidden("Only the host can start this room.");
+  if (room.hostId !== req.user.id) forbidden("Only the host of this room is allowed to start the match.");
   if (room.status === "ended") throw new HttpError(409, "That room has already finished.");
   if (room.players.length < room.minPlayers) {
     throw new HttpError(409, `You need at least ${room.minPlayers} players to start. ${room.players.length} so far.`);
@@ -168,14 +168,26 @@ router.post("/:id/start", auth.required, wrap(async (req, res) => {
 
 router.post("/:id/eliminate", auth.required, wrap(async (req, res) => {
   const room = await D.requireRoom(req.params.id);
-  if (room.hostId !== req.user.id && !req.user.isAdmin) forbidden("Only the host can eliminate a player.");
-  if (room.status !== "live") throw new HttpError(409, "This room isn't live, so its results can't be changed.");
+  if (room.hostId !== req.user.id && !req.user.isAdmin) forbidden("Only the host can eliminate or remove a player.");
   const { userId, reason } = req.body || {};
   const p = await D.getPlayer(room.id, userId);
   if (!p) notFound("That player isn't in this room.");
-  await db.run("UPDATE room_players SET eliminated = 1, elim_reason = ?, eliminated_at = ?, score = 0 WHERE room_id = ? AND user_id = ?",
-    [str(reason, 200, ""), now(), room.id, userId]);
-  await D.notify(userId, "eliminated", room.id, str(reason, 200, ""));
+  if (room.status === "open" || room.status === "draft") {
+    await D.leaveRoom(room.id, userId);
+    await D.notify(userId, "removed", room.id, str(reason, 200, "Removed by room host"));
+  } else {
+    await db.run("UPDATE room_players SET eliminated = 1, elim_reason = ?, eliminated_at = ?, score = 0 WHERE room_id = ? AND user_id = ?",
+      [str(reason, 200, "Removed by room host"), now(), room.id, userId]);
+    await D.notify(userId, "eliminated", room.id, str(reason, 200, ""));
+  }
+  res.json({ ok: true, room: await D.getRoomFull(room.id) });
+}));
+router.post("/:id/remove-player", auth.required, wrap(async (req, res) => {
+  const room = await D.requireRoom(req.params.id);
+  if (room.hostId !== req.user.id && !req.user.isAdmin) forbidden("Only the host can remove a player.");
+  const { userId, reason } = req.body || {};
+  await D.leaveRoom(room.id, userId);
+  await D.notify(userId, "removed", room.id, str(reason, 200, "Removed by room host"));
   res.json({ ok: true, room: await D.getRoomFull(room.id) });
 }));
 
