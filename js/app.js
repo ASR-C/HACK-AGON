@@ -272,19 +272,39 @@
   /* ---------- room tile renderer (shared) ---------- */
   function roomTile(room) {
     const qCount = (room.questionIds || []).length;
-    const full = room.players.length >= room.size;
-    return `<a class="card card--sticker tile" href="${room.type === "tournament" ? "tournament-details.html" : "match.html"}?room=${room.id}">
-      <div class="tile__top">${statusBadge(room)} ${room.tournamentMode ? `<span class="badge badge--proctored">${icon("camera")} Proctored</span>` : ""}</div>
-      <div class="tile__title">${escapeHtml(room.name)}</div>
-      <div class="tile__meta">
-        <span>${icon("users")} ${room.players.length}/${room.size}</span>
-        <span>${icon("clock")} ${room.durationMin}m</span>
-        <span>${icon("code")} ${qCount} question${qCount === 1 ? "" : "s"}</span>
-        <span>${escapeHtml(room.format)}</span>
-      </div>
-      <div class="row row--tight" style="gap:6px">${(room.topics || []).slice(0, 3).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>
-      <div class="tile__foot">${priceTag(room)} ${room.prizePoolPaise ? `<span class="small"><strong>Prize ${money(room.prizePoolPaise)}</strong></span>` : `<span class="xs faint">by ${escapeHtml(room.hostName || "a host")}</span>`}</div>
-    </a>`;
+    const me = S.currentUser();
+    const hostCanStart = me && (room.hostId === me.id || me.isAdmin) &&
+      (room.type === "room" || room.type === "tournament") &&
+      (room.status === "open" || room.status === "draft");
+    const link = `${room.type === "tournament" ? "tournament-details.html" : "match.html"}?room=${encodeURIComponent(room.id)}`;
+    return `<div style="display:grid;gap:var(--sp-2)">
+      <a class="card card--sticker tile" href="${link}">
+        <div class="tile__top">${statusBadge(room)} ${room.tournamentMode ? `<span class="badge badge--proctored">${icon("camera")} Proctored</span>` : ""}</div>
+        <div class="tile__title">${escapeHtml(room.name)}</div>
+        <div class="tile__meta">
+          <span>${icon("users")} ${(room.players || []).length}/${room.size}</span>
+          <span>${icon("clock")} ${room.durationMin}m</span>
+          <span>${icon("code")} ${qCount} question${qCount === 1 ? "" : "s"}</span>
+          <span>${escapeHtml(room.format)}</span>
+        </div>
+        <div class="row row--tight" style="gap:6px">${(room.topics || []).slice(0, 3).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>
+        <div class="tile__foot">${priceTag(room)} ${room.prizePoolPaise ? `<span class="small"><strong>Prize ${money(room.prizePoolPaise)}</strong></span>` : `<span class="xs faint">by ${escapeHtml(room.hostName || "a host")}</span>`}</div>
+      </a>
+      ${hostCanStart ? `<button class="btn btn--success" type="button" data-start-room="${escapeHtml(room.id)}">${icon("play")} Start match</button>` : ""}
+    </div>`;
+  }
+
+  function bindRoomStart(container) {
+    on(container, "click", ev => {
+      const button = ev.target.closest("[data-start-room]");
+      if (!button || !container.contains(button)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      act(async () => {
+        const room = await S.startRoom(button.dataset.startRoom);
+        location.href = "host-dashboard.html?room=" + encodeURIComponent(room.id);
+      }, button)(ev);
+    });
   }
 
   /* ---------- empty state ---------- */
@@ -345,7 +365,7 @@
     toast, confirmDialog, openModal, closeModal,
     mountShell, renderTopbar, renderBottomNav, requireAuth, hostChooser,
     page, act, showErrs, clearErrs, serverDown, mdToHtml,
-    roomTile, emptyState
+    roomTile, bindRoomStart, emptyState
   };
 
   // Small CSS injected once for shell-only bits (profile menu, icon sizing)

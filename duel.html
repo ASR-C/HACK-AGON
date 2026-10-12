@@ -21,22 +21,22 @@
     <div class="wrap">
       <div class="row row--between" style="align-items:flex-end;margin-bottom:var(--sp-5);flex-wrap:wrap;gap:var(--sp-3)">
         <div>
-          <span class="eyebrow">one on one</span>
-          <h1 class="squiggle">Duel</h1>
-          <p class="lead">Two players, same questions, first to pass everything wins &mdash; or the higher score when the clock runs out. Invite a friend or let us find you a partner.</p>
+          <span class="eyebrow">unranked one on one</span>
+          <h1 class="squiggle">Practice duel</h1>
+          <p class="lead">Play a free, unranked head-to-head practice match. Both players get the same questions; invite a friend or let us find you a partner.</p>
         </div>
       </div>
 
       <div class="duel-grid">
         <div class="card card--sticker">
-          <div class="card__title" style="margin-bottom:var(--sp-4)">Start a duel</div>
+          <div class="card__title" style="margin-bottom:var(--sp-4)">Start a practice duel</div>
           <div class="field" style="margin-bottom:var(--sp-4)">
             <span class="label">How do you want an opponent?</span>
             <div class="seg" id="modeSeg">
               <label class="seg__opt"><input type="radio" name="dmode" value="auto" checked><span>Auto-match me</span></label>
               <label class="seg__opt"><input type="radio" name="dmode" value="invite"><span>Invite by code</span></label>
             </div>
-            <span class="hint" id="modeHint">We&rsquo;ll pair you with whoever&rsquo;s waiting. Practice duels only &mdash; never used for paid tournaments.</span>
+            <span class="hint" id="modeHint">We&rsquo;ll pair you with whoever&rsquo;s waiting. This duel is always free and unranked.</span>
           </div>
           <div class="field" style="margin-bottom:var(--sp-4)">
             <span class="label">Pick up to 3 questions</span>
@@ -47,7 +47,7 @@
             <div class="field"><label class="label" for="dDur">Duration (min)</label><input class="input" id="dDur" type="number" min="5" max="60" value="15" /></div>
             <div class="field"><label class="label" for="dLang">Language</label><select class="select" id="dLang"></select></div>
           </div>
-          <button class="btn btn--primary btn--lg btn--block" id="goBtn">Find me a fight</button>
+          <button class="btn btn--primary btn--lg btn--block" id="goBtn">Find a practice opponent</button>
           <div class="hide" id="inviteBox" style="margin-top:var(--sp-4)">
             <div class="card card--well">
               <span class="label">Share this code</span>
@@ -59,7 +59,7 @@
 
         <div class="stack stack-4">
           <div class="card card--sticker">
-            <div class="card__title" style="margin-bottom:var(--sp-3)">Always-open practice duels</div>
+            <div class="card__title" style="margin-bottom:var(--sp-3)">Open practice duels · unranked</div>
             <div class="stack stack-2" id="openDuels"></div>
           </div>
           <div class="card card--well">
@@ -107,7 +107,8 @@
         let mode = "auto";
         on(qs("#modeSeg"), "change", e => {
           mode = e.target.value;
-          qs("#modeHint").textContent = mode === "auto" ? "We’ll pair you with whoever’s waiting. Practice duels only — never used for paid tournaments." : "You get a code to send to one specific person.";
+          qs("#modeHint").textContent = mode === "auto" ? "We’ll pair you with whoever’s waiting. This duel is always free and unranked." : "You’ll get a code to share for a free, unranked practice duel.";
+          qs("#goBtn").textContent = mode === "auto" ? "Find a practice opponent" : "Create practice invite";
         });
 
         function renderOpen() {
@@ -164,7 +165,7 @@
           }
 
           const room = await S.createRoom({
-            type: "duel", name: me.name.split(" ")[0] + " vs " + (mode === "auto" ? "whoever's next" : "a friend"),
+            type: "duel",             name: "Practice: " + me.name.split(" ")[0] + " vs " + (mode === "auto" ? "whoever's next" : "a friend"),
             format: "Duel", size: 2, langs: [qs("#dLang").value], topics: [], questionIds: picked,
             durationMin: dur, visibility: mode === "invite" ? "Private" : "Public",
             tournamentMode: false, publish: true, funded: true

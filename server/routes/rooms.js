@@ -107,7 +107,12 @@ router.post("/:id/join", auth.required, wrap(async (req, res) => {
   if (!paid) throw new HttpError(402, "This room has an entry fee. Pay it to take a seat.", { entryFeePaise: room.entryFeePaise });
 
   const result = await D.joinRoom(room.id, req.user.id);
-  res.json({ ok: true, already: !!result.already, room: result.room });
+  let joinedRoom = result.room;
+  if (room.type === "duel" && joinedRoom.status === "open" && joinedRoom.players.length >= 2) {
+    await db.run("UPDATE rooms SET status = 'live', start_time = ? WHERE id = ? AND status = 'open'", [now(), room.id]);
+    joinedRoom = await D.getRoomFull(room.id);
+  }
+  res.json({ ok: true, already: !!result.already, room: joinedRoom });
 }));
 
 router.post("/:id/leave", auth.required, wrap(async (req, res) => {

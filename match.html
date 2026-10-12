@@ -147,6 +147,7 @@
               <p class="lead" style="margin-inline:auto"><span id="seatCount">${room.players.length} of ${room.size}</span> seats taken. ${proctored() ? "Camera and tab-lock will be on." : "No proctoring on this one."}</p>
               <div class="lobby__count" id="lobbyCount">${startIn != null && startIn > 0 ? S.fmtDuration(startIn) : "any moment"}</div>
               <p class="hand muted" style="margin-top:var(--sp-3)">${room.hostId === me.id ? "you're the host — start it from the dashboard" : "starts when the host opens the floor"}</p>
+              ${room.hostId === me.id ? `<a class="btn btn--primary" style="margin-top:var(--sp-3)" href="host-dashboard.html?room=${encodeURIComponent(room.id)}">Open host dashboard</a>` : ""}
               ${proctored() ? `<div style="margin-top:var(--sp-5)"><button class="btn btn--primary btn--lg" id="camBtn">${icon("camera")} Allow camera to get ready</button><p class="xs faint" style="margin-top:8px">You can't start a proctored match without it.</p><button class="btn btn--quiet xs" id="camDemo" style="margin-top:6px">No camera here? run without one (stored as unverified)</button></div>` : ""}
             </div>
           </div>`;

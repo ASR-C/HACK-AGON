@@ -31,6 +31,7 @@
       window.App.page(async () => {
         me = window.App.requireAuth(); if (!me) return;
         window.App.mountShell(null);
+        window.App.bindRoomStart(root);
 
         let room = null;
         if (roomId) { try { room = await S.fetchRoom(roomId); } catch (e) { room = null; } }

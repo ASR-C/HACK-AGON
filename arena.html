@@ -62,7 +62,7 @@
   <script src="js/app.js"></script>
   <script>
     (function () {
-      const { qs, on, roomTile, emptyState, ICONS, toast, page } = window.App, S = window.Store, SEED = S.SEED;
+      const { qs, on, roomTile, bindRoomStart, emptyState, ICONS, toast, page } = window.App, S = window.Store, SEED = S.SEED;
       document.querySelectorAll("[data-ic]").forEach(e => { e.innerHTML = ICONS[e.dataset.ic] || ""; });
 
       const state = { q: "", lang: "", status: "", topic: "" };
@@ -85,6 +85,7 @@
       page(async () => {
         const me = window.App.requireAuth(); if (!me) return;
         window.App.mountShell("arena");
+        bindRoomStart(qs("#roomGrid"));
 
         // language select
         qs("#lang").innerHTML = '<option value="">All languages</option>' + SEED.languages.map(l => `<option value="${l.id}">${l.label}</option>`).join("");
