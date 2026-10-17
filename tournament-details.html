@@ -125,6 +125,7 @@
                   : `<label class="check" style="margin:var(--sp-4) 0"><input type="checkbox" id="acceptBox"><span class="check__box">${icon("check")}</span><span class="check__text">I've read the rules, the split, the elimination and refund terms${r.tournamentMode ? ", and the proctoring conditions" : ""}.</span></label>
                      <button class="btn btn--primary btn--block" id="joinBtn" disabled>${fee ? icon("rupee") + " Pay " + money(fee) + " &amp; join" : icon("play") + " Join"}</button>
                      <p class="xs faint" style="margin-top:var(--sp-3)">${fee ? "Charged once through Razorpay (simulated here) and held in escrow until results lock." : "Free to join. Your seat is held until start."}</p>`}
+              ${isHost && (r.status === "open" || r.status === "draft") ? `<button class="btn btn--success btn--block" style="margin-top:var(--sp-2)" id="tourneyStartBtn">${icon("play")} Start Tournament Now</button>` : ""}
               ${isHost ? `<a class="btn btn--ghost btn--block" style="margin-top:var(--sp-2)" href="host-dashboard.html?room=${r.id}">Manage as host</a>` : ""}
             </div>
             <div class="card card--well">
@@ -135,6 +136,15 @@
             </div>
           </aside>
         </div>`;
+
+        const tourneyStartBtn = qs("#tourneyStartBtn");
+        if (tourneyStartBtn) {
+          on(tourneyStartBtn, "click", act(async () => {
+            const updated = await S.startRoom(r.id);
+            toast("Tournament started! Good luck to all players.", { type: "success" });
+            location.href = "match.html?room=" + updated.id;
+          }, tourneyStartBtn));
+        }
 
         const acceptBox = qs("#acceptBox"), joinBtn = qs("#joinBtn");
         if (acceptBox) on(acceptBox, "change", () => { joinBtn.disabled = !acceptBox.checked; });

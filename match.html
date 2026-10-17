@@ -191,7 +191,7 @@
           }
           if (room.status === "live") { clearInterval(lobbyTimer); clearInterval(clockTimer); begin(); }
           else if (room.status === "ended") { stopAll(); renderEnded(); }
-        }, 3000);
+        }, 1500);
 
         const lobbyStartBtn = qs("#lobbyStartBtn");
         if (lobbyStartBtn) {
@@ -200,12 +200,20 @@
               toast("Only the host of this room is allowed to start the match.", { type: "error" });
               return;
             }
-            if (room.players.length < room.minPlayers) {
-              toast(`Need at least ${room.minPlayers} players to start. Only ${room.players.length} joined so far.`, { type: "error" });
+            if (room.players.length < 1) {
+              toast("Need at least 1 player to start.", { type: "error" });
               return;
             }
-            await S.startRoom(room.id);
-            toast("Match started!", { type: "success" });
+            try {
+              const updated = await S.startRoom(room.id);
+              room = updated || room;
+              toast("Match started! Hands on keyboards.", { type: "success" });
+              clearInterval(lobbyTimer);
+              clearInterval(clockTimer);
+              begin();
+            } catch (err) {
+              toast(err.message || "Failed to start room.", { type: "error" });
+            }
           }, lobbyStartBtn));
         }
 
@@ -389,6 +397,15 @@
         renderBoard(); renderQ();
         if (v.ok) {
           toast("All cases passed. Nice.", { type: "success" });
+          const mySlot = (room.players || []).find(p => p.userId === me.id);
+          const solvedSet = new Set(((mySlot && mySlot.solved) || (res.scored && res.scored.solved) || []));
+          solvedSet.add(q.id);
+          if (solvedSet.size >= (room.questionIds || []).length) {
+            toast("You solved every question! Finalising match...", { type: "success" });
+            try { await S.finaliseRoom(room.id); } catch(e) {}
+            setTimeout(() => { renderEnded(); }, 1200);
+            return;
+          }
           if (curQ < room.questionIds.length - 1) { curQ++; loadCode(); renderQ(); }
         } else {
           qs("#judge").insertAdjacentHTML("beforeend", `<div class="judge__row"><button class="btn btn--sm btn--ghost" id="explainBtn" style="margin-left:auto">${icon("bolt")} Ask the coach why</button></div>`);
@@ -520,6 +537,13 @@
           if (room.entryFeePaise > 0) { location.href = "tournament-details.html?room=" + room.id; return; }
           try { room = await S.joinRoom(room.id); } catch (e) { toast(e.message, { type: "error" }); }
         }
+        // Ensure all questions for this room are loaded in the local store
+        for (const qid of (room.questionIds || [])) {
+          if (!S.getQuestion(qid)) {
+            await S.fetchQuestion(qid).catch(() => {});
+          }
+        }
+
         lang = (room.langs || [])[0] || "javascript";
 
         if (S.isLocked(room.id, me.id) && room.status !== "ended") { await showLock((seat() || {}).lockReason); return; }

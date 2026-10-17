@@ -74,8 +74,9 @@
               <h1 class="squiggle">${escapeHtml(r.name)}</h1>
               <p class="lead">${r.players.length}/${r.size} players · ${r.durationMin} min · ${escapeHtml(r.format)}${r.inviteCode ? ' · invite ' + escapeHtml(r.inviteCode) : ''}</p>
             </div>
-            <div class="row">
+            <div class="row" style="flex-wrap:wrap;gap:8px">
               ${r.status === "open" || r.status === "draft" ? `<button class="btn btn--success" id="startBtn">${icon("play")} Start now</button>` : ""}
+              ${r.players.some(p => p.userId === me.id) ? `<a class="btn btn--primary" href="match.html?room=${encodeURIComponent(r.id)}">${icon("code")} ${r.status === 'live' ? 'Play Match' : 'Enter Lobby'}</a>` : ""}
               ${r.status === "live" ? `<button class="btn btn--danger" id="endBtn">${icon("flag")} End &amp; lock results</button>` : ""}
               ${r.status === "ended" && r.type === "tournament" && r.prizePoolPaise ? `<button class="btn btn--accent" id="settleBtn">${icon("rupee")} Settle payouts</button>` : ""}
               ${r.status === "ended" && cash && cash.escrowPaise ? `<button class="btn btn--ghost" id="refundBtn">${icon("refresh")} Refund entries</button>` : ""}

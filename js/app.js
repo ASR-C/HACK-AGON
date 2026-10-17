@@ -274,7 +274,6 @@
     const qCount = (room.questionIds || []).length;
     const me = S.currentUser();
     const hostCanStart = me && (room.hostId === me.id) &&
-      (room.type === "room" || room.type === "tournament") &&
       (room.status === "open" || room.status === "draft");
     const link = `${room.type === "tournament" ? "tournament-details.html" : "match.html"}?room=${encodeURIComponent(room.id)}`;
     return `<div style="display:grid;gap:var(--sp-2)">
@@ -302,7 +301,9 @@
       ev.stopPropagation();
       act(async () => {
         const room = await S.startRoom(button.dataset.startRoom);
-        location.href = "host-dashboard.html?room=" + encodeURIComponent(room.id);
+        const me = S.currentUser();
+        const isPlayer = me && room.players && room.players.some(p => p.userId === me.id);
+        location.href = (isPlayer ? "match.html" : "host-dashboard.html") + "?room=" + encodeURIComponent(room.id);
       }, button)(ev);
     });
   }

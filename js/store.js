@@ -133,6 +133,22 @@
   }
   /* Retired questions stay resolvable so a running room never loses content. */
   const getQuestion = id => state.questions.find(q => q.id === id) || null;
+  function upsertQuestion(q) {
+    if (!q || !q.id) return q;
+    const i = state.questions.findIndex(x => x.id === q.id);
+    if (i > -1) state.questions[i] = Object.assign({}, state.questions[i], q);
+    else state.questions.push(q);
+    return q;
+  }
+  async function fetchQuestion(id) {
+    let q = getQuestion(id);
+    if (q) return q;
+    try {
+      const res = await API.get("/questions/" + encodeURIComponent(id));
+      if (res && res.question) return upsertQuestion(res.question);
+    } catch(e) {}
+    return null;
+  }
   function starterFor(q, lang) {
     const s = (q && q.starters) || {};
     return s[lang] || s.javascript || "function solve() {\n  // your code here\n}\n";
@@ -468,7 +484,7 @@
     inrToPaise, paiseToInr, formatInr, platformFee,
     fmtDuration, fmtClock, fmtDate, ago,
     /* questions */
-    allQuestions, listQuestions, getQuestion, starterFor, isRetired, validateQuestion,
+    allQuestions, listQuestions, getQuestion, upsertQuestion, fetchQuestion, starterFor, isRetired, validateQuestion,
     /* auth */
     currentUser, getUserById, validateNewUser, ageFromDob,
     signup, login, logout, verifyOtp, resendOtp, canResend, resendInSecs, rememberOtp, otpMeta,

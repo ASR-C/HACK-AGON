@@ -156,10 +156,10 @@ router.patch("/:id", auth.required, wrap(async (req, res) => {
 
 router.post("/:id/start", auth.required, wrap(async (req, res) => {
   const room = await D.requireRoom(req.params.id);
-  if (room.hostId !== req.user.id) forbidden("Only the host of this room is allowed to start the match.");
+  if (room.hostId !== req.user.id && !req.user.isAdmin) forbidden("Only the host of this room is allowed to start the match.");
   if (room.status === "ended") throw new HttpError(409, "That room has already finished.");
-  if (room.players.length < room.minPlayers) {
-    throw new HttpError(409, `You need at least ${room.minPlayers} players to start. ${room.players.length} so far.`);
+  if (room.players.length < 1) {
+    throw new HttpError(409, "Need at least 1 player in the room to start.");
   }
   if (room.type === "tournament" && !room.funded) throw new HttpError(409, "Fund the prize pool before starting.");
   await db.run("UPDATE rooms SET status = 'live', start_time = ? WHERE id = ?", [now(), room.id]);
@@ -198,7 +198,13 @@ router.get("/:id/board", wrap(async (req, res) => {
 
 router.post("/:id/finalise", auth.required, wrap(async (req, res) => {
   const room = await D.requireRoom(req.params.id);
-  if (room.hostId !== req.user.id && !req.user.isAdmin) forbidden("Only the host can close this room.");
+  const isHost = room.hostId === req.user.id || req.user.isAdmin;
+  const isPlayer = room.players && room.players.some(p => p.userId === req.user.id);
+  const timeExpired = room.startTime && (now() >= room.startTime + room.durationMin * 60000);
+  const duelFinished = room.type === "duel" && room.players && room.players.some(p => (p.solved || []).length >= (room.questionIds || []).length);
+  if (!isHost && !(isPlayer && (timeExpired || duelFinished))) {
+    forbidden("Only the host can close this room.");
+  }
   if (room.resultsLocked) return res.json({ ok: true, board: room.finalBoard || [], alreadyLocked: true });
   const rows = await D.finaliseRoom(room.id);
   res.json({ ok: true, board: rows, room: await D.getRoomFull(room.id) });

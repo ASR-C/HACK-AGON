@@ -248,14 +248,14 @@ public class RoomsController extends BaseController {
     public Map<String, Object> startRoom(@PathVariable String id, HttpServletRequest req) {
         Map<String, Object> user = requireUser(req);
         Map<String, Object> room = domain.requireRoom(id);
-        if (!user.get("id").equals(room.get("hostId")))
+        boolean isHost = user.get("id").equals(room.get("hostId")) || Boolean.TRUE.equals(user.get("isAdmin"));
+        if (!isHost)
             throw HttpException.forbidden("Only the host of this room is allowed to start the match.");
         if ("ended".equals(room.get("status"))) throw HttpException.conflict("That room has already finished.");
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> players = (List<Map<String, Object>>) room.get("players");
-        long minPlayers = toLong(room.get("minPlayers"), 2);
-        if (players.size() < minPlayers)
-            throw HttpException.conflict("You need at least " + minPlayers + " players to start. " + players.size() + " so far.");
+        if (players == null || players.isEmpty())
+            throw HttpException.conflict("Need at least 1 player in the room to start.");
         if ("tournament".equals(room.get("type")) && !Boolean.TRUE.equals(room.get("funded")))
             throw HttpException.conflict("Fund the prize pool before starting.");
         db.run("UPDATE rooms SET status = 'live', start_time = ? WHERE id = ?", IdUtil.now(), id);
@@ -306,7 +306,24 @@ public class RoomsController extends BaseController {
     public Map<String, Object> finaliseRoom(@PathVariable String id, HttpServletRequest req) {
         Map<String, Object> user = requireUser(req);
         Map<String, Object> room = domain.requireRoom(id);
-        if (!user.get("id").equals(room.get("hostId")) && !Boolean.TRUE.equals(user.get("isAdmin")))
+        boolean isHost = user.get("id").equals(room.get("hostId")) || Boolean.TRUE.equals(user.get("isAdmin"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> players = (List<Map<String, Object>>) room.get("players");
+        boolean isPlayer = players != null && players.stream().anyMatch(p -> user.get("id").equals(p.get("userId")));
+        
+        long startTime = toLong(room.get("startTime"), 0);
+        long durationMin = toLong(room.get("durationMin"), 60);
+        boolean timeExpired = startTime > 0 && (IdUtil.now() >= startTime + durationMin * 60000);
+        @SuppressWarnings("unchecked")
+        List<String> qIds = (List<String>) room.get("questionIds");
+        int totalQ = qIds != null ? qIds.size() : 0;
+        boolean duelFinished = "duel".equals(room.get("type")) && players != null && players.stream().anyMatch(p -> {
+            @SuppressWarnings("unchecked")
+            List<String> solved = (List<String>) p.get("solved");
+            return solved != null && solved.size() >= totalQ;
+        });
+
+        if (!isHost && !(isPlayer && (timeExpired || duelFinished)))
             throw HttpException.forbidden("Only the host can close this room.");
         if (Boolean.TRUE.equals(room.get("resultsLocked")))
             return Map.of("ok", true, "board", room.getOrDefault("finalBoard", new ArrayList<>()), "alreadyLocked", true);
